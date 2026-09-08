@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b0c10"/>
+      <stop offset="100%" stop-color="#141824"/>
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="50%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
+    </linearGradient>
+    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#60a5fa" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#1e1b4b" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background Card -->
+  <rect width="512" height="512" rx="108" fill="url(#bgGrad)"/>
+  <rect x="8" y="8" width="496" height="496" rx="100" fill="none" stroke="#262c40" stroke-width="4"/>
+  
+  <!-- Ambient Glow -->
+  <circle cx="256" cy="256" r="180" fill="url(#glowGrad)"/>
+
+  <!-- Geometric LUMÉRÉ 'L' Monogram & Prism Motif -->
+  <g transform="translate(256, 256)">
+    <!-- Tech Diamond Grid Accent -->
+    <path d="M0 -150 L130 0 L0 150 L-130 0 Z" fill="none" stroke="#1d283a" stroke-width="8"/>
+    <path d="M0 -110 L95 0 L0 110 L-95 0 Z" fill="none" stroke="#2563eb" stroke-opacity="0.4" stroke-width="4"/>
+
+    <!-- Central 'L' Glyph & Modern Geometric Bar -->
+    <!-- Vertical pillar -->
+    <rect x="-80" y="-120" width="48" height="230" rx="24" fill="url(#accentGrad)"/>
+    <!-- Horizontal base -->
+    <rect x="-80" y="62" width="160" height="48" rx="24" fill="url(#accentGrad)"/>
+    
+    <!-- Top accent dot/core -->
+    <circle cx="70" cy="-60" r="22" fill="#38bdf8"/>
+    <circle cx="25" cy="-20" r="14" fill="#60a5fa" fill-opacity="0.8"/>
+  </g>
+</svg>

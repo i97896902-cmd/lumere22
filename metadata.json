@@ -1,0 +1,6 @@
+{
+  "name": "LUMÉRÉ",
+  "description": "Mini-ERP system tailored for a Tech & Media Production Agency featuring robust RTL support, secure RBAC authentication, contract archival, project tracks, finances, and payroll.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
