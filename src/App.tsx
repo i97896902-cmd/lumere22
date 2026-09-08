@@ -871,21 +871,21 @@ export default function App() {
       
       // Update local_profiles_credentials
       const localCredentials = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
-      if (!localCredentials[cleanEmail]) {
-        localCredentials[cleanEmail] = {
-          password: pass,
-          profile: profileData
-        };
-        localStorage.setItem("local_profiles_credentials", JSON.stringify(localCredentials));
-      }
+      localCredentials[cleanEmail] = {
+        password: pass,
+        profile: profileData
+      };
+      localStorage.setItem("local_profiles_credentials", JSON.stringify(localCredentials));
 
       // Update local_profiles_bypass
       const localProfiles = JSON.parse(localStorage.getItem("local_profiles_bypass") || "[]");
-      const exists = localProfiles.some((p: any) => p.email && p.email.trim().toLowerCase() === cleanEmail);
-      if (!exists) {
+      const index = localProfiles.findIndex((p: any) => p.email && p.email.trim().toLowerCase() === cleanEmail);
+      if (index !== -1) {
+        localProfiles[index] = { ...localProfiles[index], ...profileData };
+      } else {
         localProfiles.unshift(profileData);
-        localStorage.setItem("local_profiles_bypass", JSON.stringify(localProfiles));
       }
+      localStorage.setItem("local_profiles_bypass", JSON.stringify(localProfiles));
     };
 
     // Seed the requested employee ibrahim mohamed
@@ -919,6 +919,24 @@ export default function App() {
         status: "approved",
         specialization: "مصور",
         bio: "مصور محترف - وكالة LUMÉRÉ",
+        portfolio_link: "",
+        created_at: new Date().toISOString()
+      }
+    );
+
+    // Seed the requested employee ghareb (مونتير)
+    seedLocalUser(
+      "ghareb@lumere.com",
+      "ghareb123",
+      {
+        id: "ghareb-user-id",
+        email: "ghareb@lumere.com",
+        full_name: "غريب",
+        phone: "01095809078",
+        role: "employee",
+        status: "approved",
+        specialization: "مونتير",
+        bio: "محرر ومونتير فيديو محترف - وكالة LUMÉRÉ",
         portfolio_link: "",
         created_at: new Date().toISOString()
       }

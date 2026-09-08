@@ -92,7 +92,7 @@ function loadDB(): DBStructure {
           role: "employee",
           status: "Approved",
           specialization: "مونتير",
-          phone: "01000000001",
+          phone: "01095809078",
           bio: "محرر ومونتير فيديو محترف - وكالة LUMÉRÉ",
           created_at: new Date().toISOString()
         },
@@ -140,8 +140,8 @@ function loadDB(): DBStructure {
     }
 
     // Ensure Ghareb montage user is always present
-    const hasGhareb = parsed.users.some((u: any) => ["ghareb@lumere.com", "ghareb.lumere.com"].includes(u.email?.toLowerCase()));
-    if (!hasGhareb) {
+    const gharebUser = parsed.users.find((u: any) => ["ghareb@lumere.com", "ghareb.lumere.com"].includes(u.email?.toLowerCase()));
+    if (!gharebUser) {
       parsed.users.push({
         id: "ghareb-user-id",
         email: "ghareb@lumere.com",
@@ -150,10 +150,13 @@ function loadDB(): DBStructure {
         role: "employee",
         status: "Approved",
         specialization: "مونتير",
-        phone: "01000000001",
+        phone: "01095809078",
         bio: "محرر ومونتير فيديو محترف - وكالة LUMÉRÉ",
         created_at: new Date().toISOString()
       });
+      updated = true;
+    } else if (gharebUser.phone !== "01095809078") {
+      gharebUser.phone = "01095809078";
       updated = true;
     }
 
