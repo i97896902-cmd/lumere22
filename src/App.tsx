@@ -3,7 +3,7 @@ import {
   Users, FolderKanban, WalletCards, User, LogOut, Bell, BellRing, Plus, CheckCircle, 
   X, Trash2, Search, FileText, Send, Eye, ShieldAlert, FileSignature, 
   HelpCircle, CreditCard, TrendingUp, AlertCircle, Printer, Download, Loader2, Key,
-  AlertTriangle, Clock, Flame
+  AlertTriangle, Clock, Flame, Menu
 } from "lucide-react";
 import { 
   UserProfile, ClientProfile, Project, Task, FinanceTransaction, 
@@ -81,6 +81,7 @@ export default function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   // Search/Filter states
   const [clientSearch, setClientSearch] = useState("");
@@ -3179,28 +3180,39 @@ export default function App() {
         activeTab={activeTab} 
         setActiveTab={setActiveTab} 
         onLogout={handleLogout} 
+        isOpen={isMobileSidebarOpen}
+        onClose={() => setIsMobileSidebarOpen(false)}
       />
 
       {/* Main Container */}
-      <div className="flex-1 mr-64 min-h-screen flex flex-col overflow-x-hidden">
+      <div className="flex-1 lg:mr-64 mr-0 min-h-screen flex flex-col overflow-x-hidden">
         
         {/* Header Bar */}
-        <header className="h-16 bg-neutral-950 border-b border-neutral-900 px-8 flex items-center justify-between no-print relative z-30">
-          <div className="flex items-center gap-4">
-            <h2 className="text-sm font-bold text-white">
-              {activeTab === "dashboard" && "لوحة القيادة والمؤشرات الرقمية"}
-              {activeTab === "clients" && "سجل بيانات وإدارة العملاء للوكالة"}
-              {activeTab === "projects" && "مسارات المشاريع والمهام الإبداعية"}
-              {activeTab === "employees" && "شؤون فريق العمل والموظفين"}
-              {activeTab === "finances" && "الخزنة والواردات والمنصرف المالي والرواتب"}
-              {activeTab === "system-test" && "مركز اختبارات الضغط ومراقبة أداء الخادم"}
-              {activeTab === "profile" && "الملف الشخصي والحساب الشخصي المعتمد"}
-            </h2>
-            {loadingData && (
-              <span className="text-[10px] bg-blue-950 text-blue-400 px-2 py-0.5 rounded animate-pulse">
-                تحديث تلقائي...
-              </span>
-            )}
+        <header className="h-16 bg-neutral-950 border-b border-neutral-900 px-4 sm:px-8 flex items-center justify-between no-print relative z-30">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsMobileSidebarOpen(true)}
+              className="p-2 rounded-xl text-neutral-400 hover:text-white bg-neutral-900 lg:hidden transition"
+              title="فتح القائمة الرئيسية"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <div className="min-w-0">
+              <h2 className="text-xs sm:text-sm font-bold text-white truncate max-w-[170px] sm:max-w-none">
+                {activeTab === "dashboard" && "لوحة القيادة والمؤشرات الرقمية"}
+                {activeTab === "clients" && "سجل بيانات وإدارة العملاء للوكالة"}
+                {activeTab === "projects" && "مسارات المشاريع والمهام الإبداعية"}
+                {activeTab === "employees" && "شؤون فريق العمل والموظفين"}
+                {activeTab === "finances" && "الخزنة والواردات والمنصرف المالي والرواتب"}
+                {activeTab === "system-test" && "مركز اختبارات الضغط ومراقبة أداء الخادم"}
+                {activeTab === "profile" && "الملف الشخصي والحساب الشخصي المعتمد"}
+              </h2>
+              {loadingData && (
+                <span className="text-[10px] bg-blue-950 text-blue-400 px-2 py-0.5 rounded animate-pulse inline-block mt-0.5">
+                  تحديث تلقائي...
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-3 sm:gap-4">
@@ -3349,7 +3361,7 @@ export default function App() {
         </header>
 
         {/* Dynamic Content Views */}
-        <main className="p-8 flex-1 overflow-y-auto">
+        <main className="p-4 sm:p-6 lg:p-8 flex-1 overflow-y-auto overflow-x-hidden">
           {/* TAB 1: DASHBOARD */}
           {activeTab === "dashboard" && (
             <div className="space-y-8">

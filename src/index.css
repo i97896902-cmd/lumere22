@@ -13,12 +13,31 @@ html, body {
   direction: rtl;
   text-align: right;
   overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Mobile responsive touch and scroll helpers */
+@layer utilities {
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Mobile notch safe area support */
+.safe-pb {
+  padding-bottom: env(safe-area-inset-bottom, 1rem);
+}
+
+.safe-pt {
+  padding-top: env(safe-area-inset-top, 0.5rem);
 }
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
