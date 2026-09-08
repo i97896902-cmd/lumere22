@@ -18,7 +18,6 @@ import StressTestDashboard from "./components/StressTestDashboard";
 import ClientPortal from "./components/ClientPortal";
 import ClientAccountModal from "./components/ClientAccountModal";
 import TaskDeliveryModal from "./components/TaskDeliveryModal";
-import { PWAInstallButton } from "./components/PWAInstallButton";
 import { NotificationManagerModal } from "./components/NotificationManagerModal";
 import { sendAppNotification } from "./lib/notifications";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
@@ -3187,9 +3186,6 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3 sm:gap-4">
-            {/* PWA Install Button (Displays on Vercel / Web browsers) */}
-            <PWAInstallButton variant="header" />
-
             {/* Notification Center */}
             <div className="relative">
               <div className="flex items-center gap-1.5">
@@ -3336,11 +3332,6 @@ export default function App() {
 
         {/* Dynamic Content Views */}
         <main className="p-8 flex-1 overflow-y-auto">
-          {/* PWA Install Banner (only renders if browser allows install / iOS) */}
-          <div className="mb-6">
-            <PWAInstallButton variant="banner" />
-          </div>
-          
           {/* TAB 1: DASHBOARD */}
           {activeTab === "dashboard" && (
             <div className="space-y-8">
