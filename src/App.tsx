@@ -10,6 +10,7 @@ import {
   PayrollRecord, AppNotification, TaskStatus, Specialization, 
   ContractStatus, PaymentMethod, ProjectTrack, UserRole, UserStatus
 } from "./types";
+import { createClient } from "@supabase/supabase-js";
 import { apiFetch } from "./lib/api";
 import { supabase } from "./lib/supabaseClient";
 import ContractPreviewModal from "./components/ContractPreviewModal";
@@ -1706,7 +1707,6 @@ export default function App() {
       const cleanEmail = newEmpEmail.trim();
       const pswd = newEmpPassword.trim();
       
-      const { createClient } = await import("@supabase/supabase-js");
       const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL || "https://ddigjujidraxoptfncma.supabase.co";
       const supabaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || "sb_publishable_ZJGH_4j7GoDQNFXcTMBAnw_8MTr9Q-X";
       
