@@ -208,6 +208,12 @@ export default function App() {
     setTimeout(() => setToast(null), 4000);
   };
 
+  const isLocalRecordId = (id: string) => /^(local_|mock_|clt_|user_)/.test(id) || [
+    "ibrahim-mohamed-id-97896902",
+    "mohamed-user-id",
+    "ghareb-user-id"
+  ].includes(id);
+
   const getFriendlyErrorMessage = (err: any): string => {
     if (!err) return "حدث خطأ غير معروف";
     const msg = err.message || String(err);
@@ -2199,24 +2205,27 @@ export default function App() {
     showConfirm(`هل أنت متأكد من رغبتك في حذف ملف العميل (${targetClient.name}) وحسابه بالكامل من النظام؟`, async () => {
       try {
         // 0. Delete via Backend API
-        try {
-          await apiFetch(`/api/clients/${targetClient.id}`, { method: "DELETE" });
-        } catch (apiErr) {
-          console.warn("Backend client deletion fallback:", apiErr);
+        if (!isLocalRecordId(targetClient.id)) {
+          try {
+            await apiFetch(`/api/clients/${targetClient.id}`, { method: "DELETE" });
+          } catch (apiErr) {
+            console.warn("Backend client deletion unavailable; continuing with Supabase:", apiErr);
+          }
         }
 
         // 1. Delete from Supabase clients table
         try {
           const { error } = await supabase.from("clients").delete().eq("id", targetClient.id);
-          if (error) throw error;
+          if (error && !isLocalRecordId(targetClient.id)) throw error;
         } catch (dbErr) {
           console.warn("DB client deletion fallback:", dbErr);
         }
 
         // 2. Delete from Supabase profiles if portal user account exists
         try {
-          if (cleanEmail) {
-            await supabase.from("profiles").delete().eq("email", cleanEmail);
+          if (cleanEmail && !isLocalRecordId(targetClient.id)) {
+            const { error } = await supabase.from("profiles").delete().eq("email", cleanEmail);
+            if (error) throw error;
           }
         } catch (dbErr) {
           console.warn("DB client profile deletion fallback:", dbErr);
@@ -2270,8 +2279,9 @@ export default function App() {
 
         // 1. Delete from Supabase profiles if client role
         try {
-          if (cleanEmail) {
-            await supabase.from("profiles").delete().eq("email", cleanEmail).eq("role", "client");
+          if (cleanEmail && !isLocalRecordId(targetClient.id)) {
+            const { error } = await supabase.from("profiles").delete().eq("email", cleanEmail).eq("role", "client");
+            if (error) throw error;
           }
         } catch (dbErr) {
           console.warn("DB client profile account deletion fallback:", dbErr);
@@ -2389,16 +2399,18 @@ export default function App() {
         try {
           // 1. Delete all from Supabase clients table
           try {
-            await supabase.from("clients").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+            const { error } = await supabase.from("clients").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+            if (error) throw error;
           } catch (dbErr) {
-            console.warn("DB all clients deletion fallback:", dbErr);
+            throw dbErr;
           }
 
           // 2. Delete all client profiles from Supabase profiles table
           try {
-            await supabase.from("profiles").delete().eq("role", "client");
+            const { error } = await supabase.from("profiles").delete().eq("role", "client");
+            if (error) throw error;
           } catch (dbErr) {
-            console.warn("DB all client profiles deletion fallback:", dbErr);
+            throw dbErr;
           }
 
           // 3. Clear local_clients_bypass
@@ -2608,17 +2620,16 @@ export default function App() {
       try {
         const { error } = await supabase.from("tasks").delete().eq("id", taskId);
         if (error) {
-          if (user && user.role === "admin") {
+          if (isLocalRecordId(taskId) && user && user.role === "admin") {
             const localTasks = JSON.parse(localStorage.getItem("local_tasks_bypass") || "[]");
             const filtered = localTasks.filter((t: any) => t.id !== taskId);
             localStorage.setItem("local_tasks_bypass", JSON.stringify(filtered));
             showToast("تم حذف المهمة الفنية بنجاح (تخطي أمني معتمد لأدمن النظام) ✔️", "success");
-          } else {
-            throw error;
-          }
+          } else throw error;
         } else {
           showToast("تم حذف المهمة الفنية بنجاح", "success");
         }
+        setTasks(prev => prev.filter(task => task.id !== taskId));
         loadAllData();
       } catch (err: any) {
         showToast(err.message || "حدث خطأ في الاتصال", "error");
@@ -2772,17 +2783,16 @@ export default function App() {
       try {
         const { error } = await supabase.from("transactions").delete().eq("id", txId);
         if (error) {
-          if (user && user.role === "admin") {
+          if (isLocalRecordId(txId) && user && user.role === "admin") {
             const localTxs = JSON.parse(localStorage.getItem("local_transactions_bypass") || "[]");
             const filtered = localTxs.filter((tx: any) => tx.id !== txId);
             localStorage.setItem("local_transactions_bypass", JSON.stringify(filtered));
             showToast("تم حذف المعاملة المالية وإعادة ضبط موازنة الخزنة بنجاح (تخطي أمني معتمد لأدمن النظام) ✔️", "success");
-          } else {
-            throw error;
-          }
+          } else throw error;
         } else {
           showToast("تم حذف المعاملة المالية وإعادة ضبط موازنة الخزنة بنجاح", "success");
         }
+        setTransactions(prev => prev.filter(transaction => transaction.id !== txId));
         loadAllData();
       } catch (err: any) {
         showToast(err.message || "حدث خطأ في الاتصال", "error");
@@ -2863,17 +2873,16 @@ export default function App() {
       try {
         const { error } = await supabase.from("payroll").delete().eq("id", payId);
         if (error) {
-          if (user && user.role === "admin") {
+          if (isLocalRecordId(payId) && user && user.role === "admin") {
             const localPay = JSON.parse(localStorage.getItem("local_payroll_bypass") || "[]");
             const filtered = localPay.filter((p: any) => p.id !== payId);
             localStorage.setItem("local_payroll_bypass", JSON.stringify(filtered));
             showToast("تم حذف قيد المرتب بنجاح (تخطي أمني معتمد لأدمن النظام) ✔️", "success");
-          } else {
-            throw error;
-          }
+          } else throw error;
         } else {
           showToast("تم حذف قيد المرتب بنجاح", "success");
         }
+        setPayroll(prev => prev.filter(payrollRecord => payrollRecord.id !== payId));
         loadAllData();
       } catch (err: any) {
         showToast(err.message || "حدث خطأ في الاتصال", "error");
