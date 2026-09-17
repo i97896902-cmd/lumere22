@@ -45,7 +45,7 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed && ["yousef55554321@gmail.com", "yousef555554321@gmail.com"].includes(parsed.email?.toLowerCase())) {
+        if (parsed?.email?.toLowerCase() === "yousef555554321@gmail.com") {
           parsed.role = "admin";
           parsed.status = "Approved";
           parsed.specialization = "مدير";
@@ -327,7 +327,7 @@ export default function App() {
       });
 
       const allUsers: UserProfile[] = Array.from(mergedProfilesMap.values()).map(p => {
-        const isThisUserAdmin = ["yousef55554321@gmail.com", "yousef555554321@gmail.com"].includes(p.email?.toLowerCase() || "");
+        const isThisUserAdmin = p.email?.toLowerCase() === "yousef555554321@gmail.com";
         const userRole: UserRole = isThisUserAdmin ? "admin" : (p.role as UserRole || "employee");
         const rawStatus = String(p.status || "").toLowerCase().trim();
         const userStatus: UserStatus = (isThisUserAdmin || rawStatus === "approved" || rawStatus === "active") ? "Approved" : "Pending Approval";
@@ -711,7 +711,7 @@ export default function App() {
             .eq("id", userId)
             .single();
 
-          const isInitialAdmin = ["yousef55554321@gmail.com", "yousef555554321@gmail.com"].includes(cleanEmail.toLowerCase());
+          const isInitialAdmin = cleanEmail.toLowerCase() === "yousef555554321@gmail.com";
 
           const meta = session.user.user_metadata || {};
           const metaFullName = meta.full_name || cleanEmail.split("@")[0];
@@ -872,7 +872,7 @@ export default function App() {
         if (storedUserStr) {
           try {
             const storedUser = JSON.parse(storedUserStr);
-            if (storedUser.is_local_bypass || storedUser.email === "yousef55554321@gmail.com" || storedUser.email === "yousef555554321@gmail.com") {
+            if (storedUser.is_local_bypass || storedUser.email === "yousef555554321@gmail.com") {
               return; // Keep them logged in!
             }
           } catch (e) {}
@@ -1115,7 +1115,7 @@ export default function App() {
     try {
       if (isSignUp) {
         // Sign Up with Supabase Auth
-        const isInitialAdmin = ["yousef55554321@gmail.com", "yousef555554321@gmail.com"].includes(cleanEmail.toLowerCase());
+        const isInitialAdmin = cleanEmail.toLowerCase() === "yousef555554321@gmail.com";
         const signupRole = isInitialAdmin ? "admin" : "employee";
         const signupStatus = isInitialAdmin ? "approved" : "pending";
         const signupSpecialization = isInitialAdmin ? "مدير" : specialization;
@@ -1220,7 +1220,7 @@ export default function App() {
         let authData: any = null;
         let signInError: any = null;
 
-        const isInitialAdmin = ["yousef55554321@gmail.com", "yousef555554321@gmail.com"].includes(cleanEmail.toLowerCase());
+        const isInitialAdmin = cleanEmail.toLowerCase() === "yousef555554321@gmail.com";
 
         try {
           const res = await supabase.auth.signInWithPassword({
@@ -5557,7 +5557,7 @@ export default function App() {
                             <td className="p-3 text-[10px] text-neutral-400 font-mono">{tx.creator_email.split("@")[0]}</td>
                             <td className="p-3 text-left">
                               {/* Delete option only for specific Super Admins */}
-                              {["yousef55554321@gmail.com", "yousef555554321@gmail.com"].includes(user?.email?.toLowerCase() || "") ? (
+                              {user?.email?.toLowerCase() === "yousef555554321@gmail.com" ? (
                                 <button
                                   onClick={() => handleDeleteTransaction(tx.id)}
                                   className="text-neutral-500 hover:text-rose-400 p-1"
