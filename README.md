@@ -43,6 +43,8 @@ npm test
 
 إذا ظهر خطأ `Could not find the function public.delete_employee_account`، شغّل ملف [migrations/20260917_employee_account_delete.sql](migrations/20260917_employee_account_delete.sql) في Supabase SQL Editor، ثم أعد تحميل التطبيق.
 
+لحذف العملاء والمهام والمعاملات والرواتب بصلاحية الأدمن، شغّل أيضًا ملف [migrations/20260918_admin_delete_record.sql](migrations/20260918_admin_delete_record.sql) في Supabase SQL Editor، ثم أعد تحميل التطبيق.
+
 > ملاحظة: سياسات RLS الحالية متوافقة مع نظام الدخول المخصص الموجود في التطبيق، لكنها ليست عزلًا أمنيًا كاملًا حسب المستخدم. لا تعتبر قاعدة البيانات جاهزة لبيانات إنتاج حساسة قبل نقل تسجيل الدخول إلى Supabase Auth وتقييد السياسات باستخدام `auth.uid()`.
 
 ## Electron

@@ -214,6 +214,19 @@ export default function App() {
     "ghareb-user-id"
   ].includes(id);
 
+  const deleteAdminRecord = async (table: string, id: string) => {
+    const { error } = await supabase.rpc("admin_delete_record", {
+      p_table: table,
+      p_id: id
+    });
+    if (error) {
+      if (error.code === "PGRST202") {
+        throw new Error("دالة حذف الأدمن غير مفعلة في Supabase. شغّل migrations/20260918_admin_delete_record.sql أولاً.");
+      }
+      throw error;
+    }
+  };
+
   const getFriendlyErrorMessage = (err: any): string => {
     if (!err) return "حدث خطأ غير معروف";
     const msg = err.message || String(err);
@@ -2215,8 +2228,7 @@ export default function App() {
 
         // 1. Delete from Supabase clients table
         try {
-          const { error } = await supabase.from("clients").delete().eq("id", targetClient.id);
-          if (error && !isLocalRecordId(targetClient.id)) throw error;
+            if (!isLocalRecordId(targetClient.id)) await deleteAdminRecord("clients", targetClient.id);
         } catch (dbErr) {
           console.warn("DB client deletion fallback:", dbErr);
         }
@@ -2224,8 +2236,13 @@ export default function App() {
         // 2. Delete from Supabase profiles if portal user account exists
         try {
           if (cleanEmail && !isLocalRecordId(targetClient.id)) {
-            const { error } = await supabase.from("profiles").delete().eq("email", cleanEmail);
-            if (error) throw error;
+            const { data: profile, error: profileLookupError } = await supabase
+              .from("profiles")
+              .select("id")
+              .eq("email", cleanEmail)
+              .maybeSingle();
+            if (profileLookupError) throw profileLookupError;
+            if (profile?.id) await deleteAdminRecord("profiles", profile.id);
           }
         } catch (dbErr) {
           console.warn("DB client profile deletion fallback:", dbErr);
@@ -2280,8 +2297,14 @@ export default function App() {
         // 1. Delete from Supabase profiles if client role
         try {
           if (cleanEmail && !isLocalRecordId(targetClient.id)) {
-            const { error } = await supabase.from("profiles").delete().eq("email", cleanEmail).eq("role", "client");
-            if (error) throw error;
+            const { data: profile, error: profileLookupError } = await supabase
+              .from("profiles")
+              .select("id")
+              .eq("email", cleanEmail)
+              .eq("role", "client")
+              .maybeSingle();
+            if (profileLookupError) throw profileLookupError;
+            if (profile?.id) await deleteAdminRecord("profiles", profile.id);
           }
         } catch (dbErr) {
           console.warn("DB client profile account deletion fallback:", dbErr);
@@ -2618,7 +2641,9 @@ export default function App() {
   const handleDeleteTask = async (taskId: string) => {
     showConfirm("هل تريد حذف هذه المهمة نهائياً؟", async () => {
       try {
-        const { error } = await supabase.from("tasks").delete().eq("id", taskId);
+        const { error } = isLocalRecordId(taskId)
+          ? { error: null }
+          : await supabase.rpc("admin_delete_record", { p_table: "tasks", p_id: taskId });
         if (error) {
           if (isLocalRecordId(taskId) && user && user.role === "admin") {
             const localTasks = JSON.parse(localStorage.getItem("local_tasks_bypass") || "[]");
@@ -2781,7 +2806,9 @@ export default function App() {
   const handleDeleteTransaction = async (txId: string) => {
     showConfirm("تحذير أمني: هل تريد حذف القيد المالي وتعديل الخزنة تلقائياً؟", async () => {
       try {
-        const { error } = await supabase.from("transactions").delete().eq("id", txId);
+        const { error } = isLocalRecordId(txId)
+          ? { error: null }
+          : await supabase.rpc("admin_delete_record", { p_table: "transactions", p_id: txId });
         if (error) {
           if (isLocalRecordId(txId) && user && user.role === "admin") {
             const localTxs = JSON.parse(localStorage.getItem("local_transactions_bypass") || "[]");
@@ -2871,7 +2898,9 @@ export default function App() {
   const handleDeletePayroll = async (payId: string) => {
     showConfirm("هل تريد حذف هذا القيد؟", async () => {
       try {
-        const { error } = await supabase.from("payroll").delete().eq("id", payId);
+        const { error } = isLocalRecordId(payId)
+          ? { error: null }
+          : await supabase.rpc("admin_delete_record", { p_table: "payroll", p_id: payId });
         if (error) {
           if (isLocalRecordId(payId) && user && user.role === "admin") {
             const localPay = JSON.parse(localStorage.getItem("local_payroll_bypass") || "[]");
