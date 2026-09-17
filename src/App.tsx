@@ -308,7 +308,7 @@ export default function App() {
         }
       });
 
-      const allUsers = Array.from(mergedProfilesMap.values()).map(p => {
+      const allUsers: UserProfile[] = Array.from(mergedProfilesMap.values()).map(p => {
         const isThisUserAdmin = ["yousef55554321@gmail.com", "yousef555554321@gmail.com"].includes(p.email?.toLowerCase() || "");
         const userRole: UserRole = isThisUserAdmin ? "admin" : (p.role as UserRole || "employee");
         const rawStatus = String(p.status || "").toLowerCase().trim();
