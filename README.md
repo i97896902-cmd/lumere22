@@ -45,6 +45,8 @@ npm test
 
 لحذف العملاء والمهام والمعاملات والرواتب بصلاحية الأدمن، شغّل أيضًا ملف [migrations/20260918_admin_delete_record.sql](migrations/20260918_admin_delete_record.sql) في Supabase SQL Editor، ثم أعد تحميل التطبيق.
 
+إذا ظهرت رسالة صلاحية رغم تسجيل الدخول كأدمن، شغّل [migrations/20260918_fix_admin_authorization.sql](migrations/20260918_fix_admin_authorization.sql). هذا الملف يربط الصلاحية بـ `auth.uid()` و`profiles.id`، ويطبع قيم الدور إلى `admin` بشكل آمن.
+
 > ملاحظة: سياسات RLS الحالية متوافقة مع نظام الدخول المخصص الموجود في التطبيق، لكنها ليست عزلًا أمنيًا كاملًا حسب المستخدم. لا تعتبر قاعدة البيانات جاهزة لبيانات إنتاج حساسة قبل نقل تسجيل الدخول إلى Supabase Auth وتقييد السياسات باستخدام `auth.uid()`.
 
 ## Electron

@@ -40,6 +40,22 @@ async function test() {
     }
   }
 
+  try {
+    const { error } = await supabase.rpc("admin_delete_record", {
+      p_table: "tasks",
+      p_id: "00000000-0000-0000-0000-000000000000"
+    });
+    if (!error || error.code === "PGRST202") {
+      failed = true;
+      console.error("10. Admin delete authorization test FAILED:", error?.message || "anonymous delete was accepted");
+    } else {
+      console.log("10. Admin delete authorization test SUCCESS: anonymous request was rejected.");
+    }
+  } catch (err) {
+    failed = true;
+    console.error("10. Admin delete authorization test THREW exception:", err);
+  }
+
   process.exitCode = failed ? 1 : 0;
 }
 

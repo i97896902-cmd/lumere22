@@ -308,9 +308,14 @@ const authUser = (req: express.Request, res: express.Response, next: express.Nex
   next();
 };
 
+const isAdminRole = (role: unknown): boolean => {
+  const normalizedRole = String(role || "").trim().toLowerCase();
+  return normalizedRole === "admin" || normalizedRole === "administrator";
+};
+
 const adminOnly = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const user = (req as any).user as UserProfile;
-  if (user.role !== "admin") {
+  if (!isAdminRole(user.role)) {
     return res.status(403).json({ error: "هذه الصلاحية للمدير فقط" });
   }
   next();
@@ -860,7 +865,7 @@ app.get("/api/projects", authUser, (req, res) => {
   const db = loadDB();
   const user = (req as any).user as UserProfile;
 
-  if (user.role === "admin") {
+  if (isAdminRole(user.role)) {
     return res.json(db.projects);
   } else {
     // Standard employees only see projects they have tasks in! (Absolute restrictions/Data isolation)
@@ -911,7 +916,7 @@ app.get("/api/tasks", authUser, (req, res) => {
   const db = loadDB();
   const user = (req as any).user as UserProfile;
 
-  if (user.role === "admin") {
+  if (isAdminRole(user.role)) {
     res.json(db.tasks);
   } else {
     // STRICT DATA ISOLATION: Employee only sees their own assigned tasks
@@ -1043,7 +1048,7 @@ app.delete("/api/tasks/:id", authUser, (req, res) => {
 
   const user = (req as any).user as UserProfile;
   const task = db.tasks[taskIndex];
-  if (user.role !== "admin" && task.assigned_to_id !== user.id) {
+  if (!isAdminRole(user.role) && task.assigned_to_id !== user.id) {
     return res.status(403).json({ error: "ليس لديك صلاحية حذف هذه المهمة" });
   }
 

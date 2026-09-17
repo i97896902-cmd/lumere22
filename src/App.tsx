@@ -27,6 +27,13 @@ import { sendAppNotification } from "./lib/notifications";
 import { openWhatsAppMessage, getTaskDeliveredWhatsAppTemplate } from "./lib/whatsapp";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
 
+const normalizeUserRole = (value: unknown): UserRole => {
+  const role = String(value || "").trim().toLowerCase();
+  if (role === "admin" || role === "administrator") return "admin";
+  if (role === "client") return "client";
+  return "employee";
+};
+
 export default function App() {
   const [theme, setTheme] = useState<"dark" | "light">(() => {
     if (typeof window === "undefined") return "dark";
@@ -219,6 +226,15 @@ export default function App() {
     if (!session?.user) {
       throw new Error("يجب تسجيل دخول الأدمن عبر Supabase Auth قبل حذف البيانات.");
     }
+    const { data: currentProfile, error: profileError } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", session.user.id)
+      .single();
+    if (profileError) throw profileError;
+    if (normalizeUserRole(currentProfile?.role) !== "admin") {
+      throw new Error("حساب Supabase الحالي ليس Admin. حدّث role في profiles ثم أعد تسجيل الدخول.");
+    }
     const { error } = await supabase.rpc("admin_delete_record", {
       p_table: table,
       p_id: id
@@ -344,8 +360,8 @@ export default function App() {
       });
 
       const allUsers: UserProfile[] = Array.from(mergedProfilesMap.values()).map(p => {
-        const isThisUserAdmin = p.email?.toLowerCase() === "yousef555554321@gmail.com";
-        const userRole: UserRole = isThisUserAdmin ? "admin" : (p.role as UserRole || "employee");
+        const isThisUserAdmin = normalizeUserRole(p.role) === "admin";
+        const userRole: UserRole = normalizeUserRole(p.role);
         const rawStatus = String(p.status || "").toLowerCase().trim();
         const userStatus: UserStatus = (isThisUserAdmin || rawStatus === "approved" || rawStatus === "active") ? "Approved" : "Pending Approval";
         const userSpecialization: Specialization = isThisUserAdmin 
@@ -728,7 +744,7 @@ export default function App() {
             .eq("id", userId)
             .single();
 
-          const isInitialAdmin = cleanEmail.toLowerCase() === "yousef555554321@gmail.com";
+          const isInitialAdmin = normalizeUserRole(profile?.role) === "admin";
 
           const meta = session.user.user_metadata || {};
           const metaFullName = meta.full_name || cleanEmail.split("@")[0];
@@ -1146,7 +1162,7 @@ export default function App() {
     try {
       if (isSignUp) {
         // Sign Up with Supabase Auth
-        const isInitialAdmin = cleanEmail.toLowerCase() === "yousef555554321@gmail.com";
+        const isInitialAdmin = false;
         const signupRole = isInitialAdmin ? "admin" : "employee";
         const signupStatus = isInitialAdmin ? "approved" : "pending";
         const signupSpecialization = isInitialAdmin ? "مدير" : specialization;
@@ -3328,7 +3344,7 @@ export default function App() {
   }
 
   // Determine current active content view
-  const isAdmin = user.role === "admin";
+  const isAdmin = normalizeUserRole(user.role) === "admin";
 
   // Filter tasks for employee and project-specific tasks
   const myAssignedTasks = tasks.filter(t => t.assigned_to_id === user.id);
