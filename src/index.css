@@ -17,6 +17,99 @@ html, body {
   -webkit-overflow-scrolling: touch;
 }
 
+html,
+body,
+#root {
+  min-height: 100%;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+/* Day mode keeps the existing semantic colors while replacing the dark surfaces. */
+.theme-light,
+.theme-light body {
+  color-scheme: light;
+  background-color: #f4f7fb;
+  color: #172033;
+}
+
+.theme-light .bg-black {
+  background-color: #f4f7fb !important;
+}
+
+.theme-light [class*="bg-[#0b0c10]"],
+.theme-light [class*="bg-[#121318]"],
+.theme-light [class*="bg-neutral-950"] {
+  background-color: #ffffff !important;
+}
+
+.theme-light [class*="bg-neutral-900"] {
+  background-color: #eef2f7 !important;
+}
+
+.theme-light [class*="bg-neutral-800"] {
+  background-color: #e3e9f1 !important;
+}
+
+.theme-light [class*="text-white"] {
+  color: #172033 !important;
+}
+
+.theme-light [class*="text-neutral-100"],
+.theme-light [class*="text-neutral-200"],
+.theme-light [class*="text-neutral-300"] {
+  color: #273449 !important;
+}
+
+.theme-light [class*="text-neutral-400"],
+.theme-light [class*="text-neutral-500"],
+.theme-light [class*="text-neutral-600"] {
+  color: #607086 !important;
+}
+
+.theme-light [class*="border-[#1e2025]"],
+.theme-light [class*="border-neutral-900"],
+.theme-light [class*="border-neutral-850"],
+.theme-light [class*="border-neutral-800"] {
+  border-color: #d7e0eb !important;
+}
+
+.theme-light [class*="bg-blue-950"] {
+  background-color: #e6efff !important;
+}
+
+.theme-light [class*="bg-purple-950"] {
+  background-color: #f0eaff !important;
+}
+
+.theme-light [class*="bg-emerald-950"] {
+  background-color: #e4f7ef !important;
+}
+
+.theme-light [class*="bg-rose-950"] {
+  background-color: #ffebee !important;
+}
+
+.theme-light input,
+.theme-light textarea,
+.theme-light select {
+  color: #172033 !important;
+  background-color: #ffffff !important;
+  border-color: #cbd6e3 !important;
+}
+
+.theme-light input::placeholder,
+.theme-light textarea::placeholder {
+  color: #8290a3 !important;
+}
+
+.theme-light ::-webkit-scrollbar-track {
+  background: #e8edf4;
+}
+
+.theme-light ::-webkit-scrollbar-thumb {
+  background: #9db0c8;
+}
+
 /* Mobile responsive touch and scroll helpers */
 @layer utilities {
   .touch-target {
