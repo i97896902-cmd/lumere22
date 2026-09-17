@@ -1675,7 +1675,12 @@ export default function App() {
         const { error } = await supabase.rpc("delete_employee_account", {
           target_user_id: userId
         });
-        if (error) throw error;
+        if (error) {
+          if (error.code === "PGRST202") {
+            throw new Error("دالة حذف الموظف غير موجودة في Supabase. شغّل ملف migrations/20260917_employee_account_delete.sql أولاً.");
+          }
+          throw error;
+        }
       } catch (dbErr) {
         if (!userId.startsWith("mock_") && !userId.includes("-user-id")) throw dbErr;
         console.warn("Local-only employee deletion:", dbErr);
@@ -1706,7 +1711,12 @@ export default function App() {
           const { error } = await supabase.rpc("delete_employee_account", {
             target_user_id: employeeId
           });
-          if (error) throw error;
+          if (error) {
+            if (error.code === "PGRST202") {
+              throw new Error("دالة حذف الموظف غير موجودة في Supabase. شغّل ملف migrations/20260917_employee_account_delete.sql أولاً.");
+            }
+            throw error;
+          }
         } catch (dbErr) {
           if (!employeeId.startsWith("mock_") && !employeeId.includes("-user-id")) throw dbErr;
           console.warn("Local-only employee deletion:", dbErr);

@@ -41,6 +41,8 @@ npm test
 
 بعد تطبيق المخطط، يجب إعادة تشغيل اختبار قاعدة البيانات للتأكد من إنشاء جداول `equipment` و`audit_logs` ودالة `pay_payroll`.
 
+إذا ظهر خطأ `Could not find the function public.delete_employee_account`، شغّل ملف [migrations/20260917_employee_account_delete.sql](migrations/20260917_employee_account_delete.sql) في Supabase SQL Editor، ثم أعد تحميل التطبيق.
+
 > ملاحظة: سياسات RLS الحالية متوافقة مع نظام الدخول المخصص الموجود في التطبيق، لكنها ليست عزلًا أمنيًا كاملًا حسب المستخدم. لا تعتبر قاعدة البيانات جاهزة لبيانات إنتاج حساسة قبل نقل تسجيل الدخول إلى Supabase Auth وتقييد السياسات باستخدام `auth.uid()`.
 
 ## Electron
