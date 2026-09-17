@@ -215,6 +215,10 @@ export default function App() {
   ].includes(id);
 
   const deleteAdminRecord = async (table: string, id: string) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      throw new Error("يجب تسجيل دخول الأدمن عبر Supabase Auth قبل حذف البيانات.");
+    }
     const { error } = await supabase.rpc("admin_delete_record", {
       p_table: table,
       p_id: id
@@ -865,6 +869,20 @@ export default function App() {
             localStorage.setItem("lumere_user", JSON.stringify(safeUser));
             setUser(safeUser);
             showToast("مرحباً بك في LUMÉRÉ، تم الدخول بنجاح", "success");
+          }
+        } else {
+          const storedUser = localStorage.getItem("lumere_user");
+          if (storedUser) {
+            try {
+              const parsedUser = JSON.parse(storedUser);
+              if (parsedUser?.role === "admin") {
+                localStorage.removeItem("lumere_user");
+                setUser(null);
+                setAuthError("انتهت جلسة الأدمن. سجّل الدخول بحساب Supabase حتى تعمل عمليات الحذف.");
+              }
+            } catch {
+              localStorage.removeItem("lumere_user");
+            }
           }
         }
       } catch (err: any) {
