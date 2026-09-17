@@ -2835,51 +2835,12 @@ export default function App() {
 
     showConfirm("هل تم صرف هذا المرتب فعلياً وخصمه تلقائياً كـ (مصروف) من الخزنة؟", async () => {
       try {
-        // 1. Update payroll status in Supabase
-        const { error: payError } = await supabase
-          .from("payroll")
-          .update({ status: "تم الصرف", payment_date: new Date().toISOString().split("T")[0] })
-          .eq("id", payId);
+        const { error: payoutError } = await supabase.rpc("pay_payroll", {
+          p_payroll_id: payId
+        });
 
-        if (payError) {
-          if (user && user.role === "admin") {
-            const localPay = JSON.parse(localStorage.getItem("local_payroll_bypass") || "[]");
-            const updated = localPay.map((p: any) => p.id === payId ? { ...p, status: "تم الصرف", payment_date: new Date().toISOString().split("T")[0] } : p);
-            localStorage.setItem("local_payroll_bypass", JSON.stringify(updated));
-            
-            // Add transaction locally as expense
-            const localId = "local_tx_" + Math.random().toString(36).substring(2, 9);
-            const newLocalTx = {
-              id: localId,
-              type: "expense" as const,
-              amount: record.amount,
-              title: `صرف مرتب الموظف - ${record.employee_name} لشهر ${record.month}`,
-              client_name: "",
-              payment_method: "محفظة إلكترونية" as const,
-              creator_id: user.id,
-              creator_email: user.email,
-              created_at: new Date().toISOString()
-            };
-            const existingTxs = JSON.parse(localStorage.getItem("local_transactions_bypass") || "[]");
-            localStorage.setItem("local_transactions_bypass", JSON.stringify([newLocalTx, ...existingTxs]));
-
-            showToast("تم صرف الراتب وخصمه تلقائياً كأعباء تشغيلية من الخزنة (تخطي أمني معتمد لأدمن النظام) ✔️", "success");
-          } else {
-            throw payError;
-          }
-        } else {
-          // 2. Insert into transactions as expense
-          const { error: txError } = await supabase.from("transactions").insert({
-            type: "expense",
-            amount: record.amount,
-            description: `صرف مرتب الموظف - ${record.employee_name} لشهر ${record.month}`,
-            payment_method: "محفظة إلكترونية",
-            category: "مرتبات"
-          });
-
-          if (txError) throw txError;
-          showToast("تم صرف الراتب وخصمه تلقائياً كأعباء تشغيلية من الخزنة", "success");
-        }
+        if (payoutError) throw payoutError;
+        showToast("تم صرف الراتب وتسجيل المصروف في عملية ذرية واحدة", "success");
         loadAllData();
       } catch (err: any) {
         showToast(err.message || "حدث خطأ في الاتصال", "error");

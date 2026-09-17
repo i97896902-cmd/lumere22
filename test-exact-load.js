@@ -14,7 +14,17 @@ async function test() {
   console.log("Starting exact load query tests...");
   let failed = false;
 
-  const tables = ["profiles", "clients", "projects", "tasks", "transactions", "payroll"];
+  const tables = [
+    "profiles",
+    "clients",
+    "projects",
+    "tasks",
+    "transactions",
+    "payroll",
+    "equipment",
+    "notifications",
+    "audit_logs"
+  ];
   for (const [index, table] of tables.entries()) {
     try {
       const { data, error } = await supabase.from(table).select("*").order("created_at", { ascending: false });

@@ -7,11 +7,11 @@ CREATE TABLE IF NOT EXISTS profiles (
   full_name TEXT NOT NULL,
   phone TEXT,
   role TEXT DEFAULT 'employee' CHECK (role IN ('admin', 'employee', 'client')),
-  status TEXT DEFAULT 'pending' CHECK (status IN ('approved', 'pending')),
+  status TEXT DEFAULT 'pending' CHECK (status IN ('approved', 'pending', 'active')),
   specialization TEXT,
   bio TEXT,
   portfolio_link TEXT,
-  rating INTEGER DEFAULT 0,
+  rating INTEGER DEFAULT 0 CHECK (rating BETWEEN 0 AND 5),
   contract_url TEXT,
   contract_status TEXT DEFAULT 'قيد التوقيع',
   client_id UUID,
@@ -20,9 +20,17 @@ CREATE TABLE IF NOT EXISTS profiles (
 
 -- Enable RLS
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Public profiles are viewable by everyone" ON profiles FOR SELECT USING (true);
-CREATE POLICY "Users can insert their own profile" ON profiles FOR INSERT WITH CHECK (true);
-CREATE POLICY "Users can update their own profile" ON profiles FOR UPDATE USING (true);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public profiles are viewable by everyone' AND tablename = 'profiles') THEN
+    CREATE POLICY "Public profiles are viewable by everyone" ON profiles FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Users can insert their own profile' AND tablename = 'profiles') THEN
+    CREATE POLICY "Users can insert their own profile" ON profiles FOR INSERT WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Users can update their own profile' AND tablename = 'profiles') THEN
+    CREATE POLICY "Users can update their own profile" ON profiles FOR UPDATE USING (true);
+  END IF;
+END $$;
 
 -- 2. CLIENTS Table
 CREATE TABLE IF NOT EXISTS clients (
@@ -38,8 +46,14 @@ CREATE TABLE IF NOT EXISTS clients (
 );
 
 ALTER TABLE clients ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Clients are viewable by authenticated users" ON clients FOR SELECT USING (true);
-CREATE POLICY "Clients are manageable by admins" ON clients FOR ALL USING (true);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Clients are viewable by authenticated users' AND tablename = 'clients') THEN
+    CREATE POLICY "Clients are viewable by authenticated users" ON clients FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Clients are manageable by admins' AND tablename = 'clients') THEN
+    CREATE POLICY "Clients are manageable by admins" ON clients FOR ALL USING (true);
+  END IF;
+END $$;
 
 -- 3. PROJECTS Table
 CREATE TABLE IF NOT EXISTS projects (
@@ -48,15 +62,21 @@ CREATE TABLE IF NOT EXISTS projects (
   client_id UUID REFERENCES clients(id) ON DELETE CASCADE,
   budget NUMERIC NOT NULL DEFAULT 0,
   type TEXT NOT NULL, -- Project Type/Track
-  status TEXT DEFAULT 'قيد التنفيذ', -- 'قيد التنفيذ', 'مكتمل', 'ملغي'
+  status TEXT DEFAULT 'قيد التنفيذ' CHECK (status IN ('قيد التنفيذ', 'مكتمل', 'ملغي')), -- 'قيد التنفيذ', 'مكتمل', 'ملغي'
   deadline DATE,
   drive_url TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Projects viewable by everyone" ON projects FOR SELECT USING (true);
-CREATE POLICY "Projects manageable by admins" ON projects FOR ALL USING (true);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Projects viewable by everyone' AND tablename = 'projects') THEN
+    CREATE POLICY "Projects viewable by everyone" ON projects FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Projects manageable by admins' AND tablename = 'projects') THEN
+    CREATE POLICY "Projects manageable by admins" ON projects FOR ALL USING (true);
+  END IF;
+END $$;
 
 -- 4. TASKS Table
 CREATE TABLE IF NOT EXISTS tasks (
@@ -71,17 +91,23 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Tasks viewable by everyone" ON tasks FOR SELECT USING (true);
-CREATE POLICY "Tasks manageable by authenticated users" ON tasks FOR ALL USING (true);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Tasks viewable by everyone' AND tablename = 'tasks') THEN
+    CREATE POLICY "Tasks viewable by everyone" ON tasks FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Tasks manageable by authenticated users' AND tablename = 'tasks') THEN
+    CREATE POLICY "Tasks manageable by authenticated users" ON tasks FOR ALL USING (true);
+  END IF;
+END $$;
 
 -- 5. TRANSACTIONS Table
 -- Keep this name aligned with the client queries in src/App.tsx.
 CREATE TABLE IF NOT EXISTS transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   type TEXT NOT NULL CHECK (type IN ('income', 'expense', 'revenue')),
-  amount NUMERIC NOT NULL DEFAULT 0,
+  amount NUMERIC NOT NULL DEFAULT 0 CHECK (amount >= 0),
   client_id UUID REFERENCES clients(id) ON DELETE SET NULL,
-  payment_method TEXT NOT NULL, -- 'كاش', 'محفظة إلكترونية', 'أنستا باي (InstaPay)'
+  payment_method TEXT NOT NULL CHECK (payment_method IN ('كاش', 'محفظة إلكترونية', 'أنستا باي (InstaPay)')), -- 'كاش', 'محفظة إلكترونية', 'أنستا باي (InstaPay)'
   date DATE DEFAULT CURRENT_DATE,
   description TEXT NOT NULL,
   category TEXT NOT NULL DEFAULT 'تشغيلية',
@@ -91,14 +117,20 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Transactions viewable by admins" ON transactions FOR SELECT USING (true);
-CREATE POLICY "Transactions manageable by admins" ON transactions FOR ALL USING (true);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Transactions viewable by admins' AND tablename = 'transactions') THEN
+    CREATE POLICY "Transactions viewable by admins" ON transactions FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Transactions manageable by admins' AND tablename = 'transactions') THEN
+    CREATE POLICY "Transactions manageable by admins" ON transactions FOR ALL USING (true);
+  END IF;
+END $$;
 
 -- 6. PAYROLL Table
 CREATE TABLE IF NOT EXISTS payroll (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   employee_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
-  amount NUMERIC NOT NULL DEFAULT 0,
+  amount NUMERIC NOT NULL DEFAULT 0 CHECK (amount >= 0),
   month TEXT NOT NULL,
   status TEXT DEFAULT 'معلق' CHECK (status IN ('تم الصرف', 'معلق')),
   payment_date DATE,
@@ -106,8 +138,14 @@ CREATE TABLE IF NOT EXISTS payroll (
 );
 
 ALTER TABLE payroll ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Payroll viewable by admins" ON payroll FOR SELECT USING (true);
-CREATE POLICY "Payroll manageable by admins" ON payroll FOR ALL USING (true);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Payroll viewable by admins' AND tablename = 'payroll') THEN
+    CREATE POLICY "Payroll viewable by admins" ON payroll FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Payroll manageable by admins' AND tablename = 'payroll') THEN
+    CREATE POLICY "Payroll manageable by admins" ON payroll FOR ALL USING (true);
+  END IF;
+END $$;
 
 -- 7. EQUIPMENT Table
 CREATE TABLE IF NOT EXISTS equipment (
@@ -127,8 +165,14 @@ CREATE TABLE IF NOT EXISTS equipment (
 );
 
 ALTER TABLE equipment ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Equipment viewable by authenticated users" ON equipment FOR SELECT USING (true);
-CREATE POLICY "Equipment manageable by admins" ON equipment FOR ALL USING (true);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Equipment viewable by authenticated users' AND tablename = 'equipment') THEN
+    CREATE POLICY "Equipment viewable by authenticated users" ON equipment FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Equipment manageable by admins' AND tablename = 'equipment') THEN
+    CREATE POLICY "Equipment manageable by admins" ON equipment FOR ALL USING (true);
+  END IF;
+END $$;
 
 -- 8. NOTIFICATIONS Table
 CREATE TABLE IF NOT EXISTS notifications (
@@ -138,24 +182,100 @@ CREATE TABLE IF NOT EXISTS notifications (
   message TEXT NOT NULL,
   is_read BOOLEAN DEFAULT false,
   type TEXT DEFAULT 'info',
-  project_id UUID,
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
   days_left INTEGER,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Notifications viewable by recipient" ON notifications FOR SELECT USING (true);
-CREATE POLICY "Notifications manageable by authenticated users" ON notifications FOR ALL USING (true);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Notifications viewable by recipient' AND tablename = 'notifications') THEN
+    CREATE POLICY "Notifications viewable by recipient" ON notifications FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Notifications manageable by authenticated users' AND tablename = 'notifications') THEN
+    CREATE POLICY "Notifications manageable by authenticated users" ON notifications FOR ALL USING (true);
+  END IF;
+END $$;
 
 -- 9. AUDIT LOGS Table
 CREATE TABLE IF NOT EXISTS audit_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   action TEXT NOT NULL,
-  user_id UUID,
+  user_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
   user_email TEXT,
   timestamp TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   details TEXT
 );
 
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Audit logs viewable by admins" ON audit_logs FOR SELECT USING (true);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Audit logs viewable by admins' AND tablename = 'audit_logs') THEN
+    CREATE POLICY "Audit logs viewable by admins" ON audit_logs FOR SELECT USING (true);
+  END IF;
+END $$;
+
+-- 10. Atomic payroll payout
+-- inserting a transaction as two independent requests.
+CREATE OR REPLACE FUNCTION pay_payroll(p_payroll_id UUID)
+RETURNS TABLE (payroll_id UUID, transaction_id UUID)
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public
+AS $$
+DECLARE
+  payroll_row payroll%ROWTYPE;
+  created_transaction_id UUID;
+BEGIN
+  SELECT * INTO payroll_row
+  FROM payroll
+  WHERE id = p_payroll_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Payroll record not found';
+  END IF;
+
+  IF payroll_row.status = 'تم الصرف' THEN
+    RAISE EXCEPTION 'Payroll record has already been paid';
+  END IF;
+
+  UPDATE payroll
+  SET status = 'تم الصرف', payment_date = CURRENT_DATE
+  WHERE id = p_payroll_id;
+
+  INSERT INTO transactions (
+    type, amount, payment_method, description, category, creator_id
+  ) VALUES (
+    'expense', payroll_row.amount, 'محفظة إلكترونية',
+    'صرف مرتب الموظف لشهر ' || payroll_row.month, 'مرتبات', payroll_row.employee_id
+  )
+  RETURNING id INTO created_transaction_id;
+
+  RETURN QUERY SELECT p_payroll_id, created_transaction_id;
+END;
+$$;
+
+-- Storage setup for contract uploads. Access control should be tightened
+-- further when the client is migrated to Supabase Auth.
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('contracts', 'contracts', true)
+ON CONFLICT (id) DO NOTHING;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Authenticated users can upload contracts' AND tablename = 'objects') THEN
+    CREATE POLICY "Authenticated users can upload contracts"
+    ON storage.objects FOR INSERT TO authenticated
+    WITH CHECK (bucket_id = 'contracts');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Authenticated users can update contracts' AND tablename = 'objects') THEN
+    CREATE POLICY "Authenticated users can update contracts"
+    ON storage.objects FOR UPDATE TO authenticated
+    USING (bucket_id = 'contracts')
+    WITH CHECK (bucket_id = 'contracts');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Public contract files are readable' AND tablename = 'objects') THEN
+    CREATE POLICY "Public contract files are readable"
+    ON storage.objects FOR SELECT TO public
+    USING (bucket_id = 'contracts');
+  END IF;
+END $$;
