@@ -183,32 +183,53 @@ export default function TaskDeliveryModal({
           )}
 
           {/* Action Buttons */}
-          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-neutral-900">
+          <div className="flex items-center justify-between gap-2.5 pt-3 border-t border-neutral-900">
             <button
               type="button"
-              onClick={onClose}
-              disabled={submitting}
-              className="bg-neutral-900 hover:bg-neutral-850 text-xs text-neutral-300 px-4 py-2.5 rounded-xl border border-neutral-800 transition"
+              onClick={() => {
+                const combinedNotes = [notes.trim(), driveLink.trim() ? `رابط الشغل: ${driveLink.trim()}` : ""].filter(Boolean).join("\n");
+                const msg = `مرحباً 👋🏼
+تم تسليم وإنجاز مهمة فنية بنجاح في مشروع لدى وكالة *LUMÉRÉ*:
+📌 *المهمة:* ${task.title}
+🎬 *المشروع:* ${task.project_title}
+${combinedNotes ? `📝 *المخرجات:* ${combinedNotes}` : ""}
+
+يمكنك الاطلاع على العمل الكامل واكتشافه بالمنصة مباشرة. ✨`;
+                window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+              }}
+              className="bg-emerald-950/60 hover:bg-emerald-900 text-emerald-400 border border-emerald-900/40 text-xs font-bold px-3 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5"
+              title="تجهيز وإرسال إشعار التسليم عبر واتساب"
             >
-              إلغاء
+              <span>إرسال بالواتساب 💬</span>
             </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white font-bold text-xs px-6 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-blue-950/50 transition cursor-pointer"
-            >
-              {submitting ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                  <span>جاري التسليم...</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>تأكيد التسليم الفني للمهمة</span>
-                </>
-              )}
-            </button>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={submitting}
+                className="bg-neutral-900 hover:bg-neutral-850 text-xs text-neutral-300 px-4 py-2.5 rounded-xl border border-neutral-800 transition"
+              >
+                إلغاء
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white font-bold text-xs px-6 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-blue-950/50 transition cursor-pointer"
+              >
+                {submitting ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                    <span>جاري التسليم...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>تأكيد التسليم الفني للمهمة</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
         </form>

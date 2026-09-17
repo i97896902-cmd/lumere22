@@ -207,24 +207,49 @@ export default function ClientAccountModal({
             </p>
           </div>
 
-          {/* Quick Copy Message Preview */}
+          {/* Quick Copy & WhatsApp Send Preview */}
           <div className="p-3 bg-neutral-900/50 border border-neutral-850 rounded-xl flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-neutral-300 text-xs truncate">
               <Lock className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span className="truncate">نسخ رسالة الترحيب وبيانات الدخول للعميل</span>
+              <span className="truncate">رسالة الترحيب وبيانات الدخول للعميل</span>
             </div>
-            <button
-              type="button"
-              onClick={handleCopyCredentials}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
-                copied
-                  ? "bg-emerald-950 text-emerald-400 border border-emerald-900/40"
-                  : "bg-blue-600 hover:bg-blue-500 text-white"
-              }`}
-            >
-              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-              <span>{copied ? "تم النسخ!" : "نسخ الرسالة"}</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const msg = `مرحباً ${client.name} 👋🏼
+تم تفعيل حسابك في بوابة وكالة *LUMÉRÉ* لمتابعة نسبة إنجاز مهامك ومشاريعك الإبداعية:
+🔗 رابط المنصة: ${window.location.origin}
+📧 البريد الإلكتروني: ${client.email}
+🔑 كلمة المرور: ${password}`;
+                  
+                  if (client.phone) {
+                    let clean = client.phone.replace(/[^0-9]/g, "");
+                    if (clean.startsWith("01") && clean.length === 11) clean = "20" + clean.substring(1);
+                    window.open(`https://wa.me/${clean}?text=${encodeURIComponent(msg)}`, "_blank");
+                    showToast("تم فتح WhatsApp لإرسال بيانات الدخول للعميل 💬", "success");
+                  } else {
+                    showToast("يرجى التأكد من رقم هاتف العميل", "error");
+                  }
+                }}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                title="إرسال رسالة ترحيبية فورية بالواتساب"
+              >
+                <span>واتساب 💬</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleCopyCredentials}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                  copied
+                    ? "bg-emerald-950 text-emerald-400 border border-emerald-900/40"
+                    : "bg-blue-600 hover:bg-blue-500 text-white"
+                }`}
+              >
+                {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copied ? "تم النسخ!" : "نسخ الرسالة"}</span>
+              </button>
+            </div>
           </div>
 
           {/* Account Management Operations (Delete Account / Delete Client) */}

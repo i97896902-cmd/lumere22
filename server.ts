@@ -629,6 +629,31 @@ app.delete("/api/equipment/:id", authUser, adminOnly, (req, res) => {
   saveDB(db);
   res.json({ message: "تم حذف المعدة بنجاح" });
 });
+// Delete Task (employees can delete their own tasks, admin can delete any)
+app.delete("/api/tasks/:id", authUser, (req, res) => {
+  const { id } = req.params;
+  const db = loadDB();
+  if (!db.tasks) db.tasks = [];
+
+  const taskIndex = db.tasks.findIndex(t => t.id === id);
+  if (taskIndex === -1) {
+    return res.status(404).json({ error: "المهمة غير موجودة" });
+  }
+
+  const user = (req as any).user as UserProfile;
+  const task = db.tasks[taskIndex];
+  // Allow admin or task owner to delete
+  if (user.role !== "admin" && task.assigned_to_id !== user.id) {
+    return res.status(403).json({ error: "ليس لديك صلاحية حذف هذه المهمة" });
+  }
+
+  const deletedTask = db.tasks.splice(taskIndex, 1)[0];
+
+  logAudit(db, user.id, user.email, "DELETE_TASK", `تم حذف المهمة: ${deletedTask.title}`);
+  saveDB(db);
+  res.json({ message: "تم حذف المهمة بنجاح", deletedTask });
+});
+
 
 app.post("/api/users/rate", authUser, adminOnly, (req, res) => {
   const { employeeId, rating } = req.body;
@@ -1322,6 +1347,23 @@ app.delete("/api/notifications/clear", authUser, (req, res) => {
 
   saveDB(db);
   res.json({ message: "تم مسح كافة التنبيهات بنجاح" });
+});
+
+app.post("/api/notifications/whatsapp", authUser, (req, res) => {
+  const { recipientPhone, recipientName, type, details } = req.body;
+  const user = (req as any).user as UserProfile;
+  const db = loadDB();
+
+  logAudit(
+    db, 
+    user.id, 
+    user.email, 
+    "SEND_WHATSAPP_NOTIFICATION", 
+    `تم إرسال إشعار واتساب (${type || "رسالة مباشرة"}) إلى ${recipientName || "مستلم"} (${recipientPhone || "بدون رقم"}) - التفاصيل: ${details || ""}`
+  );
+
+  saveDB(db);
+  res.json({ message: "تم تسجيل إشعار واتساب بنجاح" });
 });
 
 // --- GOOGLE SIMULATED AUTH PAGE ---

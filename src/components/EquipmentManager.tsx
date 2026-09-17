@@ -360,7 +360,38 @@ export default function EquipmentManager({
                         <UserCheck className="w-3.5 h-3.5" />
                         <span>المستلم:</span>
                       </span>
-                      <span>{item.assigned_to_name}</span>
+                      <div className="flex items-center gap-2">
+                        <span>{item.assigned_to_name}</span>
+                        {item.assigned_to_id && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const emp = employees.find(e => e.id === item.assigned_to_id);
+                              const phone = emp?.phone || "";
+                              const msg = `تذكير عاجل - معدات الإنتاج 🎥
+أهلاً ${item.assigned_to_name}،
+نود تذكيرك بموعد إرجاع المعدة لمخزن وكالة *LUMÉRÉ*:
+📷 *المعدة:* ${item.name}
+📅 *تاريخ الإرجاع المتوقع:* ${item.return_date || "قريباً"}
+يرجى تسليمها في الموعد المحدد. شاكرين تعاونك! 🙏🏼`;
+                              
+                              if (phone) {
+                                let clean = phone.replace(/[^0-9]/g, "");
+                                if (clean.startsWith("01") && clean.length === 11) clean = "20" + clean.substring(1);
+                                window.open(`https://wa.me/${clean}?text=${encodeURIComponent(msg)}`, "_blank");
+                                showToast("تم فتح WhatsApp لإرسال التذكير للمستلم 💬", "success");
+                              } else {
+                                window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+                                showToast("تم تجهيز رسالة التذكير للإرسال 💬", "success");
+                              }
+                            }}
+                            className="text-[10px] bg-emerald-950 text-emerald-400 hover:bg-emerald-900 border border-emerald-900/40 px-2 py-0.5 rounded font-bold transition cursor-pointer"
+                            title="إرسال تذكير إرجاع بالواتساب للمستلم"
+                          >
+                            تذكير 💬
+                          </button>
+                        )}
+                      </div>
                     </div>
                     {item.project_title && (
                       <p className="text-[11px] text-neutral-400 truncate">
