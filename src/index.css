@@ -28,49 +28,49 @@ body,
 .theme-light,
 .theme-light body {
   color-scheme: light;
-  background-color: #edf1f5;
-  color: #263447;
+  background-color: #dfe5ec;
+  color: #243246;
 }
 
 .theme-light .bg-black {
-  background-color: #edf1f5 !important;
+  background-color: #dfe5ec !important;
 }
 
 .theme-light [class*="bg-[#0b0c10]"],
 .theme-light [class*="bg-[#121318]"],
 .theme-light [class*="bg-neutral-950"] {
-  background-color: #f8fafc !important;
+  background-color: #eef2f6 !important;
 }
 
 .theme-light [class*="bg-neutral-900"] {
-  background-color: #f1f4f7 !important;
-}
-
-.theme-light [class*="bg-neutral-800"] {
   background-color: #e5eaf0 !important;
 }
 
+.theme-light [class*="bg-neutral-800"] {
+  background-color: #d7dfe8 !important;
+}
+
 .theme-light [class*="text-white"] {
-  color: #263447 !important;
+  color: #243246 !important;
 }
 
 .theme-light [class*="text-neutral-100"],
 .theme-light [class*="text-neutral-200"],
 .theme-light [class*="text-neutral-300"] {
-  color: #3b4a5e !important;
+  color: #34445a !important;
 }
 
 .theme-light [class*="text-neutral-400"],
 .theme-light [class*="text-neutral-500"],
 .theme-light [class*="text-neutral-600"] {
-  color: #718096 !important;
+  color: #5f7085 !important;
 }
 
 .theme-light [class*="border-[#1e2025]"],
 .theme-light [class*="border-neutral-900"],
 .theme-light [class*="border-neutral-850"],
 .theme-light [class*="border-neutral-800"] {
-  border-color: #d9e1e9 !important;
+  border-color: #bcc8d5 !important;
 }
 
 .theme-light [class*="bg-blue-950"] {
@@ -135,22 +135,22 @@ body,
 .theme-light input,
 .theme-light textarea,
 .theme-light select {
-  color: #263447 !important;
-  background-color: #fbfcfd !important;
-  border-color: #cbd5e1 !important;
+  color: #243246 !important;
+  background-color: #f0f4f8 !important;
+  border-color: #b8c5d3 !important;
 }
 
 .theme-light input::placeholder,
 .theme-light textarea::placeholder {
-  color: #8a97a8 !important;
+  color: #718095 !important;
 }
 
 .theme-light ::-webkit-scrollbar-track {
-  background: #e5eaf0;
+  background: #d1d9e3;
 }
 
 .theme-light ::-webkit-scrollbar-thumb {
-  background: #aebdcd;
+  background: #8fa2b7;
 }
 
 /* Mobile responsive touch and scroll helpers */
