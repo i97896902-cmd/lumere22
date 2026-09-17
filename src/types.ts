@@ -1,5 +1,5 @@
 export type UserRole = "admin" | "employee" | "client";
-export type UserStatus = "Pending Approval" | "Approved";
+export type UserStatus = "Pending Approval" | "Approved" | "pending" | "approved" | "active";
 export type Specialization = "مونتير" | "مبرمج" | "مصور" | "جرافيك ديزاينر" | "إنتاج" | "يتدرب" | "مدير" | "مبرمج جوكر" | "عميل";
 export type ContractStatus = "ساري" | "منتهي" | "قيد التوقيع";
 

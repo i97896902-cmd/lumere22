@@ -279,3 +279,105 @@ DO $$ BEGIN
     USING (bucket_id = 'contracts');
   END IF;
 END $$;
+
+-- 11. Employee account deletion
+CREATE OR REPLACE FUNCTION delete_employee_account(target_user_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  caller_role TEXT;
+BEGIN
+  SELECT role INTO caller_role FROM profiles WHERE id = auth.uid();
+  IF caller_role IS DISTINCT FROM 'admin' THEN
+    RAISE EXCEPTION 'Only admins can delete employee accounts';
+  END IF;
+  IF target_user_id = auth.uid() THEN
+    RAISE EXCEPTION 'An admin cannot delete their own account';
+  END IF;
+  DELETE FROM profiles WHERE id = target_user_id AND role = 'employee';
+  DELETE FROM auth.users WHERE id = target_user_id;
+END;
+$$;
+
+-- 12. Supabase Auth RLS hardening
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin');
+$$;
+
+DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON profiles;
+DROP POLICY IF EXISTS "Users can insert their own profile" ON profiles;
+DROP POLICY IF EXISTS "Users can update their own profile" ON profiles;
+DROP POLICY IF EXISTS "Profiles are visible to authenticated users" ON profiles;
+DROP POLICY IF EXISTS "Users can create their own profile" ON profiles;
+DROP POLICY IF EXISTS "Users can update their profile or admins" ON profiles;
+DROP POLICY IF EXISTS "Admins can delete profiles" ON profiles;
+CREATE POLICY "Profiles are visible to authenticated users" ON profiles FOR SELECT TO authenticated USING (auth.uid() = id OR public.is_admin());
+CREATE POLICY "Users can create their own profile" ON profiles FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);
+CREATE POLICY "Users can update their profile or admins" ON profiles FOR UPDATE TO authenticated USING (auth.uid() = id OR public.is_admin()) WITH CHECK (auth.uid() = id OR public.is_admin());
+CREATE POLICY "Admins can delete profiles" ON profiles FOR DELETE TO authenticated USING (public.is_admin());
+
+DROP POLICY IF EXISTS "Clients are viewable by authenticated users" ON clients;
+DROP POLICY IF EXISTS "Clients are manageable by admins" ON clients;
+DROP POLICY IF EXISTS "Authenticated users can view clients" ON clients;
+DROP POLICY IF EXISTS "Admins can manage clients" ON clients;
+CREATE POLICY "Authenticated users can view clients" ON clients FOR SELECT TO authenticated USING (public.is_admin() OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'employee'));
+CREATE POLICY "Admins can manage clients" ON clients FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+DROP POLICY IF EXISTS "Projects viewable by everyone" ON projects;
+DROP POLICY IF EXISTS "Projects manageable by admins" ON projects;
+DROP POLICY IF EXISTS "Authenticated users can view projects" ON projects;
+DROP POLICY IF EXISTS "Admins can manage projects" ON projects;
+CREATE POLICY "Authenticated users can view projects" ON projects FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Admins can manage projects" ON projects FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+DROP POLICY IF EXISTS "Tasks viewable by everyone" ON tasks;
+DROP POLICY IF EXISTS "Tasks manageable by authenticated users" ON tasks;
+DROP POLICY IF EXISTS "Authenticated users can view tasks" ON tasks;
+DROP POLICY IF EXISTS "Admins can create and delete tasks" ON tasks;
+DROP POLICY IF EXISTS "Admins can delete tasks" ON tasks;
+DROP POLICY IF EXISTS "Assigned employees can update tasks" ON tasks;
+CREATE POLICY "Authenticated users can view tasks" ON tasks FOR SELECT TO authenticated USING (assigned_to_id = auth.uid() OR public.is_admin() OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Admins can create and delete tasks" ON tasks FOR INSERT TO authenticated WITH CHECK (public.is_admin());
+CREATE POLICY "Admins can delete tasks" ON tasks FOR DELETE TO authenticated USING (public.is_admin());
+CREATE POLICY "Assigned employees can update tasks" ON tasks FOR UPDATE TO authenticated USING (assigned_to_id = auth.uid() OR public.is_admin()) WITH CHECK (assigned_to_id = auth.uid() OR public.is_admin());
+
+DROP POLICY IF EXISTS "Transactions viewable by admins" ON transactions;
+DROP POLICY IF EXISTS "Transactions manageable by admins" ON transactions;
+DROP POLICY IF EXISTS "Admins can view transactions" ON transactions;
+DROP POLICY IF EXISTS "Admins can manage transactions" ON transactions;
+CREATE POLICY "Admins can view transactions" ON transactions FOR SELECT TO authenticated USING (public.is_admin());
+CREATE POLICY "Admins can manage transactions" ON transactions FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+DROP POLICY IF EXISTS "Payroll viewable by admins" ON payroll;
+DROP POLICY IF EXISTS "Payroll manageable by admins" ON payroll;
+DROP POLICY IF EXISTS "Admins can view payroll" ON payroll;
+DROP POLICY IF EXISTS "Admins can manage payroll" ON payroll;
+CREATE POLICY "Admins can view payroll" ON payroll FOR SELECT TO authenticated USING (public.is_admin());
+CREATE POLICY "Admins can manage payroll" ON payroll FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+DROP POLICY IF EXISTS "Equipment viewable by authenticated users" ON equipment;
+DROP POLICY IF EXISTS "Equipment manageable by admins" ON equipment;
+DROP POLICY IF EXISTS "Authenticated users can view equipment" ON equipment;
+DROP POLICY IF EXISTS "Admins can manage equipment" ON equipment;
+CREATE POLICY "Authenticated users can view equipment" ON equipment FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Admins can manage equipment" ON equipment FOR ALL TO authenticated USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+DROP POLICY IF EXISTS "Notifications viewable by recipient" ON notifications;
+DROP POLICY IF EXISTS "Notifications manageable by authenticated users" ON notifications;
+DROP POLICY IF EXISTS "Recipients can view notifications" ON notifications;
+DROP POLICY IF EXISTS "Recipients can update notifications" ON notifications;
+CREATE POLICY "Recipients can view notifications" ON notifications FOR SELECT TO authenticated USING (user_id = auth.uid() OR public.is_admin());
+CREATE POLICY "Recipients can update notifications" ON notifications FOR UPDATE TO authenticated USING (user_id = auth.uid() OR public.is_admin()) WITH CHECK (user_id = auth.uid() OR public.is_admin());
+
+DROP POLICY IF EXISTS "Audit logs viewable by admins" ON audit_logs;
+DROP POLICY IF EXISTS "Admins can view audit logs" ON audit_logs;
+CREATE POLICY "Admins can view audit logs" ON audit_logs FOR SELECT TO authenticated USING (public.is_admin());

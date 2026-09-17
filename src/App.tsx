@@ -894,15 +894,22 @@ export default function App() {
 
   // Pre-seed known users into local bypass in case of confirmation issues
   useEffect(() => {
-    const seedLocalUser = (email: string, pass: string, profileData: any) => {
+    const localCredentials = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
+    Object.entries(localCredentials).forEach(([email, record]: [string, any]) => {
+      if (record?.profile?.role === "employee") delete localCredentials[email];
+    });
+    localStorage.setItem("local_profiles_credentials", JSON.stringify(localCredentials));
+
+    const seedLocalUser = (email: string, pass: string | null, profileData: any) => {
       const cleanEmail = email.trim().toLowerCase();
       
-      // Update local_profiles_credentials
+      // Employee passwords must remain in Supabase Auth, never in browser storage.
       const localCredentials = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
-      localCredentials[cleanEmail] = {
-        password: pass,
-        profile: profileData
-      };
+      if (profileData.role === "employee") {
+        delete localCredentials[cleanEmail];
+      } else if (pass) {
+        localCredentials[cleanEmail] = { password: pass, profile: profileData };
+      }
       localStorage.setItem("local_profiles_credentials", JSON.stringify(localCredentials));
 
       // Update local_profiles_bypass
@@ -1186,14 +1193,6 @@ export default function App() {
         const existingProfiles = JSON.parse(localStorage.getItem("local_profiles_bypass") || "[]");
         localStorage.setItem("local_profiles_bypass", JSON.stringify([newLocalProfile, ...existingProfiles]));
 
-        // Save credentials to local backup for seamless bypass
-        const localCredentials = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
-        localCredentials[cleanEmail.toLowerCase()] = {
-          password: password,
-          profile: newLocalProfile
-        };
-        localStorage.setItem("local_profiles_credentials", JSON.stringify(localCredentials));
-
         if (profileError) {
           console.warn("Profile insert during signup failed, but will be auto-created upon login:", profileError);
         }
@@ -1229,7 +1228,7 @@ export default function App() {
         }
 
         // If signIn fails, check if we can auto-register/sign-up this admin user or handle fallback!
-        if (signInError && isInitialAdmin) {
+        if (signInError && isInitialAdmin && (import.meta as any).env.VITE_ALLOW_EMERGENCY_ADMIN === "true") {
           console.warn("Standard login failed for initial admin, trying auto-signup fallback...");
           try {
             const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
@@ -1282,7 +1281,7 @@ export default function App() {
           const targetEmail = cleanEmail.toLowerCase();
           const savedRecord = localCreds[targetEmail];
 
-          if (savedRecord && savedRecord.password === password) {
+          if (savedRecord && savedRecord.profile?.role !== "employee" && savedRecord.password === password) {
             console.warn("Detected match in local credentials, bypassing online authentication.");
             
             // Fetch updated profile state from local_profiles_bypass if available (so status updates take effect)
@@ -1624,8 +1623,7 @@ export default function App() {
   // Admin Pipeline Actions
   const handleApproveUser = async (userId: string, spec: Specialization) => {
     try {
-      const allowedDbSpecs = ['مونتير', 'مبرمج', 'مصور', 'جرافيك ديزاينر', 'إنتاج'];
-      const dbSpec = allowedDbSpecs.includes(spec) ? spec : null;
+      const dbSpec = spec;
       let finalStatusValue = "active";
       
       // Update status directly in Supabase (with fallback to 'approved' if constraint rejects 'active')
@@ -1674,19 +1672,24 @@ export default function App() {
     }
     try {
       try {
-        const { error } = await supabase
-          .from("profiles")
-          .delete()
-          .eq("id", userId);
+        const { error } = await supabase.rpc("delete_employee_account", {
+          target_user_id: userId
+        });
         if (error) throw error;
       } catch (dbErr) {
-        console.warn("Database user deletion failed, continuing with local storage fallback:", dbErr);
+        if (!userId.startsWith("mock_") && !userId.includes("-user-id")) throw dbErr;
+        console.warn("Local-only employee deletion:", dbErr);
       }
 
       // Delete from local storage backup
       const localProfiles = JSON.parse(localStorage.getItem("local_profiles_bypass") || "[]");
       const updatedLocalProfiles = localProfiles.filter((p: any) => p.id !== userId);
       localStorage.setItem("local_profiles_bypass", JSON.stringify(updatedLocalProfiles));
+      const localCredentials = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
+      Object.entries(localCredentials).forEach(([email, record]: [string, any]) => {
+        if (record?.profile?.id === userId) delete localCredentials[email];
+      });
+      localStorage.setItem("local_profiles_credentials", JSON.stringify(localCredentials));
 
       showToast("تم رفض طلب الانضمام وحذف ملف المستخدم بنجاح", "success");
       setRejectConfirmId(null);
@@ -1700,19 +1703,24 @@ export default function App() {
     showConfirm("هل أنت متأكد من رغبتك في حذف هذا الموظف نهائياً من قاعدة البيانات والنظام؟", async () => {
       try {
         try {
-          const { error } = await supabase
-            .from("profiles")
-            .delete()
-            .eq("id", employeeId);
+          const { error } = await supabase.rpc("delete_employee_account", {
+            target_user_id: employeeId
+          });
           if (error) throw error;
         } catch (dbErr) {
-          console.warn("Database employee deletion failed, continuing with local storage cleanup:", dbErr);
+          if (!employeeId.startsWith("mock_") && !employeeId.includes("-user-id")) throw dbErr;
+          console.warn("Local-only employee deletion:", dbErr);
         }
 
         // Delete from local storage backup
         const localProfiles = JSON.parse(localStorage.getItem("local_profiles_bypass") || "[]");
         const updatedLocalProfiles = localProfiles.filter((p: any) => p.id !== employeeId);
         localStorage.setItem("local_profiles_bypass", JSON.stringify(updatedLocalProfiles));
+        const localCredentials = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
+        Object.entries(localCredentials).forEach(([email, record]: [string, any]) => {
+          if (record?.profile?.id === employeeId) delete localCredentials[email];
+        });
+        localStorage.setItem("local_profiles_credentials", JSON.stringify(localCredentials));
 
         showToast("تم حذف الموظف بنجاح من النظام 🗑️", "success");
         loadAllData();
@@ -1768,8 +1776,7 @@ export default function App() {
         throw new Error("فشل إنشاء حساب مستخدم.");
       }
 
-      const allowedDbSpecs = ['مونتير', 'مبرمج', 'مصور', 'جرافيك ديزاينر', 'إنتاج'];
-      const dbSpec = allowedDbSpecs.includes(newEmpSpec) ? newEmpSpec : null;
+      const dbSpec = newEmpSpec;
 
       const { error: profileError } = await supabase
         .from("profiles")
@@ -1803,14 +1810,6 @@ export default function App() {
       };
       const existingProfiles = JSON.parse(localStorage.getItem("local_profiles_bypass") || "[]");
       localStorage.setItem("local_profiles_bypass", JSON.stringify([newLocalProfile, ...existingProfiles]));
-
-      // Save credentials to local backup for seamless bypass
-      const localCredentials = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
-      localCredentials[cleanEmail.toLowerCase()] = {
-        password: pswd,
-        profile: newLocalProfile
-      };
-      localStorage.setItem("local_profiles_credentials", JSON.stringify(localCredentials));
 
       showToast("تم إنشاء وإضافة الموظف الجديد بنجاح! ✔️", "success");
       
