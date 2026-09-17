@@ -1,12 +1,10 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { 
   X, 
   Send, 
   Link as LinkIcon, 
-  FileText, 
   CheckCircle2, 
   AlertCircle,
-  ExternalLink,
   Info
 } from "lucide-react";
 import { Task } from "../types";
@@ -31,6 +29,13 @@ export default function TaskDeliveryModal({
   const [driveLink, setDriveLink] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || !task) return;
+    setNotes(task.delivery_notes || "");
+    setDriveLink("");
+    setError(null);
+  }, [isOpen, task]);
 
   if (!isOpen || !task) return null;
 

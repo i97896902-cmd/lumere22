@@ -11,7 +11,6 @@ import {
   Trash2, 
   Calendar, 
   Tag, 
-  FileText,
   AlertCircle,
   X,
   Edit3
