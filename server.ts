@@ -629,32 +629,6 @@ app.delete("/api/equipment/:id", authUser, adminOnly, (req, res) => {
   saveDB(db);
   res.json({ message: "تم حذف المعدة بنجاح" });
 });
-// Delete Task (employees can delete their own tasks, admin can delete any)
-app.delete("/api/tasks/:id", authUser, (req, res) => {
-  const { id } = req.params;
-  const db = loadDB();
-  if (!db.tasks) db.tasks = [];
-
-  const taskIndex = db.tasks.findIndex(t => t.id === id);
-  if (taskIndex === -1) {
-    return res.status(404).json({ error: "المهمة غير موجودة" });
-  }
-
-  const user = (req as any).user as UserProfile;
-  const task = db.tasks[taskIndex];
-  // Allow admin or task owner to delete
-  if (user.role !== "admin" && task.assigned_to_id !== user.id) {
-    return res.status(403).json({ error: "ليس لديك صلاحية حذف هذه المهمة" });
-  }
-
-  const deletedTask = db.tasks.splice(taskIndex, 1)[0];
-
-  logAudit(db, user.id, user.email, "DELETE_TASK", `تم حذف المهمة: ${deletedTask.title}`);
-  saveDB(db);
-  res.json({ message: "تم حذف المهمة بنجاح", deletedTask });
-});
-
-
 app.post("/api/users/rate", authUser, adminOnly, (req, res) => {
   const { employeeId, rating } = req.body;
   if (!employeeId || rating === undefined) {
@@ -1058,8 +1032,8 @@ app.put("/api/tasks/:id", authUser, (req, res) => {
   res.json(task);
 });
 
-// Delete Task (Admin only)
-app.delete("/api/tasks/:id", authUser, adminOnly, (req, res) => {
+// Delete Task (admins or the assigned employee)
+app.delete("/api/tasks/:id", authUser, (req, res) => {
   const { id } = req.params;
   const db = loadDB();
   const taskIndex = db.tasks.findIndex(t => t.id === id);
@@ -1067,14 +1041,18 @@ app.delete("/api/tasks/:id", authUser, adminOnly, (req, res) => {
     return res.status(404).json({ error: "المهمة غير موجودة" });
   }
 
-  const taskTitle = db.tasks[taskIndex].title;
-  db.tasks.splice(taskIndex, 1);
+  const user = (req as any).user as UserProfile;
+  const task = db.tasks[taskIndex];
+  if (user.role !== "admin" && task.assigned_to_id !== user.id) {
+    return res.status(403).json({ error: "ليس لديك صلاحية حذف هذه المهمة" });
+  }
 
-  const admin = (req as any).user as UserProfile;
-  logAudit(db, admin.id, admin.email, "DELETE_TASK", `تم حذف المهمة "${taskTitle}"`);
+  const deletedTask = db.tasks.splice(taskIndex, 1)[0];
+
+  logAudit(db, user.id, user.email, "DELETE_TASK", `تم حذف المهمة "${deletedTask.title}"`);
 
   saveDB(db);
-  res.json({ message: "تم حذف المهمة بنجاح" });
+  res.json({ message: "تم حذف المهمة بنجاح", deletedTask });
 });
 
 // --- ADVANCED FINANCES & VAULT ---
@@ -1500,6 +1478,31 @@ app.post("/api/auth/google-signin", (req, res) => {
       fullName: fullName || normalizedEmail.split("@")[0] 
     });
   }
+});
+
+// --- WHATSAPP NOTIFICATION LOGGING ---
+app.post("/api/notifications/whatsapp", authUser, (req, res) => {
+  const { recipientName, recipientPhone, templateType, message } = req.body;
+  if (typeof recipientPhone !== "string" || !recipientPhone.trim() ||
+      typeof templateType !== "string" || !templateType.trim() ||
+      typeof message !== "string" || !message.trim()) {
+    return res.status(400).json({ error: "بيانات الإشعار غير مكتملة" });
+  }
+
+  const db = loadDB();
+  const user = (req as any).user as UserProfile;
+
+  // Log as audit entry
+  logAudit(
+    db,
+    user.id,
+    user.email,
+    "WHATSAPP_NOTIFICATION",
+    `تم إرسال إشعار واتساب (${templateType.trim()}) لـ ${recipientName || recipientPhone} - ${message.trim().substring(0, 80)}...`
+  );
+
+  saveDB(db);
+  res.json({ message: "تم توثيق إشعار الواتساب بنجاح", templateType: templateType.trim(), recipientName });
 });
 
 // --- FORGOT PASSWORD ENDPOINT ---

@@ -74,23 +74,25 @@ ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Tasks viewable by everyone" ON tasks FOR SELECT USING (true);
 CREATE POLICY "Tasks manageable by authenticated users" ON tasks FOR ALL USING (true);
 
--- 5. FINANCIAL RECORDS Table
-CREATE TABLE IF NOT EXISTS financial_records (
+-- 5. TRANSACTIONS Table
+-- Keep this name aligned with the client queries in src/App.tsx.
+CREATE TABLE IF NOT EXISTS transactions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   type TEXT NOT NULL CHECK (type IN ('income', 'expense', 'revenue')),
   amount NUMERIC NOT NULL DEFAULT 0,
   client_id UUID REFERENCES clients(id) ON DELETE SET NULL,
   payment_method TEXT NOT NULL, -- 'كاش', 'محفظة إلكترونية', 'أنستا باي (InstaPay)'
   date DATE DEFAULT CURRENT_DATE,
-  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'تشغيلية',
   creator_id UUID,
   creator_email TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
-ALTER TABLE financial_records ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Financial records viewable by admins" ON financial_records FOR SELECT USING (true);
-CREATE POLICY "Financial records manageable by admins" ON financial_records FOR ALL USING (true);
+ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Transactions viewable by admins" ON transactions FOR SELECT USING (true);
+CREATE POLICY "Transactions manageable by admins" ON transactions FOR ALL USING (true);
 
 -- 6. PAYROLL Table
 CREATE TABLE IF NOT EXISTS payroll (

@@ -10,6 +10,7 @@ import {
   Info
 } from "lucide-react";
 import { Task } from "../types";
+import { openWhatsAppMessage, getTaskDeliveredWhatsAppTemplate } from "../lib/whatsapp";
 
 interface TaskDeliveryModalProps {
   isOpen: boolean;
@@ -26,12 +27,12 @@ export default function TaskDeliveryModal({
   onSubmit,
   isAdmin = false
 }: TaskDeliveryModalProps) {
-  if (!isOpen || !task) return null;
-
-  const [notes, setNotes] = useState(task.delivery_notes || "");
+  const [notes, setNotes] = useState(task?.delivery_notes || "");
   const [driveLink, setDriveLink] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  if (!isOpen || !task) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -188,14 +189,12 @@ export default function TaskDeliveryModal({
               type="button"
               onClick={() => {
                 const combinedNotes = [notes.trim(), driveLink.trim() ? `رابط الشغل: ${driveLink.trim()}` : ""].filter(Boolean).join("\n");
-                const msg = `مرحباً 👋🏼
-تم تسليم وإنجاز مهمة فنية بنجاح في مشروع لدى وكالة *LUMÉRÉ*:
-📌 *المهمة:* ${task.title}
-🎬 *المشروع:* ${task.project_title}
-${combinedNotes ? `📝 *المخرجات:* ${combinedNotes}` : ""}
-
-يمكنك الاطلاع على العمل الكامل واكتشافه بالمنصة مباشرة. ✨`;
-                window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+                const msg = getTaskDeliveredWhatsAppTemplate({
+                  taskTitle: task.title,
+                  projectTitle: task.project_title || "",
+                  deliveryNotes: combinedNotes || undefined
+                });
+                openWhatsAppMessage("", msg);
               }}
               className="bg-emerald-950/60 hover:bg-emerald-900 text-emerald-400 border border-emerald-900/40 text-xs font-bold px-3 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5"
               title="تجهيز وإرسال إشعار التسليم عبر واتساب"

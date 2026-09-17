@@ -10,6 +10,7 @@
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist dist-electron",
     "lint": "tsc --noEmit",
+    "test": "node test-exact-load.js",
     "electron:test": "npm run build && electron .",
     "electron:build": "npm run build && electron-builder --win"
   },

@@ -1,20 +1,47 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# LUMÉRÉ ERP
 
-# Run and deploy your AI Studio app
+نظام إدارة لوكالات الإنتاج الإعلامي والتقني، مبني بواجهة React وVite مع خادم Express وتطبيق Electron.
 
-This contains everything you need to run your app locally.
+## المتطلبات
 
-View your app in AI Studio: https://ai.studio/apps/8ac11bd8-e986-4e76-8f31-79f44581154b
+- Node.js 20 أو أحدث
+- مشروع Supabase عند استخدام مصدر البيانات السحابي
 
-## Run Locally
+## التشغيل المحلي
 
-**Prerequisites:**  Node.js
+```bash
+npm install
+npm run dev
+```
 
+يفتح الخادم الواجهة على `http://localhost:3000`.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## الفحص والبناء
+
+```bash
+npm run lint
+npm run build
+```
+
+لاختبار جداول Supabase، عرّف المتغيرين التاليين ثم شغّل:
+
+```bash
+SUPABASE_URL=https://your-project.supabase.co SUPABASE_ANON_KEY=your-anon-key npm test
+```
+
+على PowerShell:
+
+```powershell
+$env:SUPABASE_URL = "https://your-project.supabase.co"
+$env:SUPABASE_ANON_KEY = "your-anon-key"
+npm test
+```
+
+طبّق [schema.sql](schema.sql) على مشروع Supabase قبل تشغيل اختبار الاتصال. يستخدم التطبيق جدول `transactions` للمعاملات المالية.
+
+## Electron
+
+```bash
+npm run electron:test
+npm run electron:build
+```
