@@ -24,6 +24,7 @@ import EquipmentManager from "./components/EquipmentManager";
 import CalendarView from "./components/CalendarView";
 import { NotificationManagerModal } from "./components/NotificationManagerModal";
 import { sendAppNotification } from "./lib/notifications";
+import { openWhatsAppMessage, getTaskDeliveredWhatsAppTemplate } from "./lib/whatsapp";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
 
 export default function App() {
@@ -2644,6 +2645,10 @@ export default function App() {
   // Complete Task Submission (Delivery notes & links)
   const handleConfirmTaskDelivery = async (taskId: string, deliveryNotesText: string) => {
     try {
+      const deliveredTask = tasks.find(task => task.id === taskId);
+      const relatedProject = deliveredTask ? projects.find(project => project.id === deliveredTask.project_id) : undefined;
+      const relatedClient = relatedProject ? clients.find(client => client.id === relatedProject.client_id) : undefined;
+
       // Optimistic local state update
       setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: "Completed", delivery_notes: deliveryNotesText } : t));
 
@@ -2668,6 +2673,19 @@ export default function App() {
         showToast("تم تسليم وإنجاز مخرجات المهمة بنجاح ✔️", "success");
       } else {
         showToast("تم تسليم وإنجاز مخرجات المهمة بنجاح وجاري إبلاغ الإدارة", "success");
+      }
+
+      if (relatedClient?.phone?.trim() && deliveredTask) {
+        const message = getTaskDeliveredWhatsAppTemplate({
+          taskTitle: deliveredTask.title,
+          projectTitle: deliveredTask.project_title || relatedProject?.title || "",
+          deliveryNotes: deliveryNotesText,
+          recipientName: relatedClient.name
+        });
+        openWhatsAppMessage(relatedClient.phone, message);
+        showToast(`تم تجهيز رسالة إنجاز المهمة للعميل ${relatedClient.name} عبر WhatsApp`, "success");
+      } else {
+        showToast("تم حفظ التسليم، لكن لا يوجد رقم WhatsApp مسجل لهذا العميل", "error");
       }
 
       setDeliveryModalTask(null);
