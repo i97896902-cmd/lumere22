@@ -114,3 +114,22 @@ export interface AppNotification {
   project_id?: string;
   days_left?: number;
 }
+
+export type EquipmentCategory = "كاميرات" | "عدسات" | "إضاءة" | "صوت وميكروفونات" | "مثبتات وطائرات درون" | "ملحقات وأخرى";
+export type EquipmentStatus = "متاحة" | "قيد الاستخدام" | "في الصيانة";
+
+export interface EquipmentItem {
+  id: string;
+  name: string;
+  category: EquipmentCategory;
+  serial_number: string;
+  status: EquipmentStatus;
+  assigned_to_id?: string;
+  assigned_to_name?: string;
+  project_id?: string;
+  project_title?: string;
+  checkout_date?: string;
+  return_date?: string;
+  notes?: string;
+  created_at: string;
+}

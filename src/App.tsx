@@ -8,7 +8,8 @@ import {
 import { 
   UserProfile, ClientProfile, Project, Task, FinanceTransaction, 
   PayrollRecord, AppNotification, TaskStatus, Specialization, 
-  ContractStatus, PaymentMethod, ProjectTrack, UserRole, UserStatus
+  ContractStatus, PaymentMethod, ProjectTrack, UserRole, UserStatus,
+  EquipmentItem, EquipmentCategory, EquipmentStatus
 } from "./types";
 import { createClient } from "@supabase/supabase-js";
 import { apiFetch } from "./lib/api";
@@ -19,6 +20,8 @@ import StressTestDashboard from "./components/StressTestDashboard";
 import ClientPortal from "./components/ClientPortal";
 import ClientAccountModal from "./components/ClientAccountModal";
 import TaskDeliveryModal from "./components/TaskDeliveryModal";
+import EquipmentManager from "./components/EquipmentManager";
+import CalendarView from "./components/CalendarView";
 import { NotificationManagerModal } from "./components/NotificationManagerModal";
 import { sendAppNotification } from "./lib/notifications";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
@@ -75,6 +78,8 @@ export default function App() {
   const [clients, setClients] = useState<ClientProfile[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [equipment, setEquipment] = useState<EquipmentItem[]>([]);
+  const [projectDisplayMode, setProjectDisplayMode] = useState<"list" | "calendar">("list");
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [payroll, setPayroll] = useState<PayrollRecord[]>([]);
@@ -539,6 +544,15 @@ export default function App() {
         })
       ];
       setPayroll(mappedPayroll);
+
+      // Fetch Equipment List
+      let equipmentData: EquipmentItem[] = [];
+      try {
+        equipmentData = await apiFetch("/api/equipment");
+      } catch (eqErr) {
+        console.warn("Equipment fetch via API fallback:", eqErr);
+      }
+      setEquipment(equipmentData);
 
       // 7. Dynamic Notifications & Urgent Project Deadlines System
       const activeNotifications: AppNotification[] = [];
@@ -2005,10 +2019,39 @@ export default function App() {
     }
   };
 
+  // Notifications Handlers
+  const handleMarkNotificationRead = async (id: string) => {
+    try {
+      await apiFetch(`/api/notifications/${id}/read`, { method: "POST" });
+    } catch (err) {
+      console.warn("Read notification API fallback:", err);
+    }
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+  };
+
+  const handleClearNotifications = async () => {
+    try {
+      await apiFetch("/api/notifications/clear", { method: "DELETE" });
+    } catch (err) {
+      console.warn("Clear notifications API fallback:", err);
+    }
+    setNotifications([]);
+  };
+
   // Save or update client login account
   const handleSaveClientAccount = async (targetClient: ClientProfile, portalPassword: string) => {
     const cleanEmail = targetClient.email.trim().toLowerCase();
     const clientUserId = "clt_user_" + targetClient.id;
+
+    // 0. Call Backend Express API to save client account
+    try {
+      await apiFetch(`/api/clients/${targetClient.id}/account`, {
+        method: "POST",
+        body: JSON.stringify({ password: portalPassword })
+      });
+    } catch (apiErr) {
+      console.warn("Backend client account API fallback:", apiErr);
+    }
 
     // 1. Try Supabase Auth creation
     try {
@@ -2134,6 +2177,13 @@ export default function App() {
     const cleanEmail = targetClient.email?.trim().toLowerCase();
     showConfirm(`هل أنت متأكد من رغبتك في حذف ملف العميل (${targetClient.name}) وحسابه بالكامل من النظام؟`, async () => {
       try {
+        // 0. Delete via Backend API
+        try {
+          await apiFetch(`/api/clients/${targetClient.id}`, { method: "DELETE" });
+        } catch (apiErr) {
+          console.warn("Backend client deletion fallback:", apiErr);
+        }
+
         // 1. Delete from Supabase clients table
         try {
           const { error } = await supabase.from("clients").delete().eq("id", targetClient.id);
@@ -2190,6 +2240,13 @@ export default function App() {
     const cleanEmail = targetClient.email?.trim().toLowerCase();
     showConfirm(`هل تريد إلغاء وحذف حساب الدخول لبوابة العميل (${targetClient.name})؟ سيبقى ملف العميل مسجلاً مع إيقاف إمكانية تسجيل دخوله.`, async () => {
       try {
+        // 0. Delete account via Backend API
+        try {
+          await apiFetch(`/api/clients/${targetClient.id}/account`, { method: "DELETE" });
+        } catch (apiErr) {
+          console.warn("Backend client account deletion fallback:", apiErr);
+        }
+
         // 1. Delete from Supabase profiles if client role
         try {
           if (cleanEmail) {
@@ -2231,6 +2288,71 @@ export default function App() {
         showToast(err.message || "حدث خطأ أثناء إلغاء حساب العميل", "error");
       }
     }, `إلغاء حساب العميل`);
+  };
+
+  // --- EQUIPMENT MANAGEMENT HANDLERS ---
+  const handleAddEquipment = async (itemData: { name: string; category: EquipmentCategory; serial_number: string; notes: string }) => {
+    try {
+      const newItem = await apiFetch("/api/equipment", {
+        method: "POST",
+        body: JSON.stringify(itemData)
+      });
+      setEquipment(prev => [newItem, ...prev]);
+    } catch (err: any) {
+      showToast(err.message || "فشل إضافة المعدة", "error");
+      throw err;
+    }
+  };
+
+  const handleEditEquipment = async (item: EquipmentItem) => {
+    try {
+      const updated = await apiFetch(`/api/equipment/${item.id}`, {
+        method: "PUT",
+        body: JSON.stringify(item)
+      });
+      setEquipment(prev => prev.map(e => e.id === item.id ? updated : e));
+    } catch (err: any) {
+      showToast(err.message || "فشل تعديل المعدة", "error");
+      throw err;
+    }
+  };
+
+  const handleCheckoutEquipment = async (checkoutData: any) => {
+    try {
+      const updated = await apiFetch("/api/equipment/checkout", {
+        method: "POST",
+        body: JSON.stringify(checkoutData)
+      });
+      setEquipment(prev => prev.map(e => e.id === checkoutData.equipmentId ? updated : e));
+    } catch (err: any) {
+      showToast(err.message || "فشل تسليم المعدة", "error");
+      throw err;
+    }
+  };
+
+  const handleReturnEquipment = async (equipmentId: string) => {
+    try {
+      const updated = await apiFetch("/api/equipment/return", {
+        method: "POST",
+        body: JSON.stringify({ equipmentId })
+      });
+      setEquipment(prev => prev.map(e => e.id === equipmentId ? updated : e));
+    } catch (err: any) {
+      showToast(err.message || "فشل إرجاع المعدة", "error");
+      throw err;
+    }
+  };
+
+  const handleDeleteEquipment = async (equipmentId: string) => {
+    try {
+      await apiFetch(`/api/equipment/${equipmentId}`, {
+        method: "DELETE"
+      });
+      setEquipment(prev => prev.filter(e => e.id !== equipmentId));
+    } catch (err: any) {
+      showToast(err.message || "فشل حذف المعدة", "error");
+      throw err;
+    }
   };
 
   // Delete ALL clients and all client portal accounts
@@ -2763,11 +2885,12 @@ export default function App() {
   // Read all notifications
   const handleReadAllNotifications = async () => {
     try {
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-      showToast("تم قراءة جميع التنبيهات", "success");
+      await apiFetch("/api/notifications/read-all", { method: "POST" });
     } catch (err: any) {
-      console.error(err);
+      console.warn("Read all notifications API fallback:", err);
     }
+    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    showToast("تم قراءة جميع التنبيهات", "success");
   };
 
   // Data Export to CSV Utility
@@ -3202,6 +3325,7 @@ export default function App() {
                 {activeTab === "dashboard" && "لوحة القيادة والمؤشرات الرقمية"}
                 {activeTab === "clients" && "سجل بيانات وإدارة العملاء للوكالة"}
                 {activeTab === "projects" && "مسارات المشاريع والمهام الإبداعية"}
+                {activeTab === "equipment" && "معدات الإنتاج وأجهزة التصوير والصوت"}
                 {activeTab === "employees" && "شؤون فريق العمل والموظفين"}
                 {activeTab === "finances" && "الخزنة والواردات والمنصرف المالي والرواتب"}
                 {activeTab === "system-test" && "مركز اختبارات الضغط ومراقبة أداء الخادم"}
@@ -4419,6 +4543,27 @@ export default function App() {
                     className="w-full bg-neutral-950 border border-neutral-850 rounded-xl pr-10 pl-4 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
                   />
                 </div>
+
+                <div className="flex items-center gap-1 bg-neutral-900 p-1 rounded-xl border border-neutral-850">
+                  <button
+                    type="button"
+                    onClick={() => setProjectDisplayMode("list")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                      projectDisplayMode === "list" ? "bg-blue-600 text-white" : "text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    قائمة 📋
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setProjectDisplayMode("calendar")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                      projectDisplayMode === "calendar" ? "bg-blue-600 text-white" : "text-neutral-400 hover:text-white"
+                    }`}
+                  >
+                    تقويم 📅
+                  </button>
+                </div>
                 
                 {isAdmin && (
                   <div className="flex gap-2">
@@ -4612,7 +4757,10 @@ export default function App() {
               )}
 
               {/* Projects & Creative briefs catalog */}
-              <div className="space-y-4">
+              {projectDisplayMode === "calendar" ? (
+                <CalendarView projects={projects} tasks={tasks} equipment={equipment} />
+              ) : (
+                <div className="space-y-4">
                 {projects
                   .filter(p => {
                     if (user.role === "client") {
@@ -4866,8 +5014,25 @@ export default function App() {
                   </div>
                 )}
               </div>
+              )}
 
             </div>
+          )}
+
+          {/* TAB: EQUIPMENT MANAGEMENT */}
+          {activeTab === "equipment" && user.role !== "client" && (
+            <EquipmentManager
+              user={user}
+              equipment={equipment}
+              employees={employees}
+              projects={projects}
+              onAddEquipment={handleAddEquipment}
+              onEditEquipment={handleEditEquipment}
+              onCheckoutEquipment={handleCheckoutEquipment}
+              onReturnEquipment={handleReturnEquipment}
+              onDeleteEquipment={handleDeleteEquipment}
+              showToast={showToast}
+            />
           )}
 
           {/* TAB 4: EMPLOYEES - ADMIN ONLY */}

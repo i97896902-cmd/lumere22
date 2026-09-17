@@ -10,7 +10,8 @@ import {
   Task, 
   FinanceTransaction, 
   PayrollRecord, 
-  AppNotification 
+  AppNotification,
+  EquipmentItem 
 } from "./src/types";
 
 const app = express();
@@ -49,6 +50,7 @@ interface DBStructure {
   finances: FinanceTransaction[];
   payroll: PayrollRecord[];
   notifications: AppNotification[];
+  equipment?: EquipmentItem[];
   auditLogs: Array<{
     id: string;
     action: string;
@@ -58,6 +60,54 @@ interface DBStructure {
     details: string;
   }>;
 }
+
+const defaultEquipmentList: EquipmentItem[] = [
+  {
+    id: "eq_sony_fx3_01",
+    name: "كاميرا سينمائية Sony FX3 Cinema Line",
+    category: "كاميرات",
+    serial_number: "SN-FX3-88902",
+    status: "متاحة",
+    notes: "دقة 4K 120fps مع بطاريتين وكارت ذاكرة 128GB Tough CFE",
+    created_at: new Date().toISOString()
+  },
+  {
+    id: "eq_lens_gm_2470",
+    name: "عدسة Sony FE 24-70mm f/2.8 GM II",
+    category: "عدسات",
+    serial_number: "SN-GM-77412",
+    status: "متاحة",
+    notes: "عدسة زوم سينمائية شاملة مع فلاتر ND متغيرة",
+    created_at: new Date().toISOString()
+  },
+  {
+    id: "eq_aputure_600d",
+    name: "إضاءة سينمائية Aputure LS 600d Pro Daylight",
+    category: "إضاءة",
+    serial_number: "SN-APT-600D-01",
+    status: "متاحة",
+    notes: "مع Softbox 90cm وسافت جيل للتصوير الإعلاني",
+    created_at: new Date().toISOString()
+  },
+  {
+    id: "eq_rode_wireless_pro",
+    name: "مايك لاسلكي Rode Wireless PRO Dual System",
+    category: "صوت وميكروفونات",
+    serial_number: "SN-RODE-992",
+    status: "متاحة",
+    notes: "نظام تسجيل 32-bit float مع 2 مايك لافالير احترافي",
+    created_at: new Date().toISOString()
+  },
+  {
+    id: "eq_dji_rs3_pro",
+    name: "مثبت كاميرا مانع اهتزاز DJI RS 3 Pro Combo",
+    category: "مثبتات وطائرات درون",
+    serial_number: "SN-DJI-RS3P-44",
+    status: "متاحة",
+    notes: "مع محرك الفوكس (Focus Motor) ومقبض تحكم جانبي",
+    created_at: new Date().toISOString()
+  }
+];
 
 function loadDB(): DBStructure {
   if (!fs.existsSync(DB_FILE)) {
@@ -175,6 +225,11 @@ function loadDB(): DBStructure {
         bio: "مصور محترف - وكالة LUMÉRÉ",
         created_at: new Date().toISOString()
       });
+      updated = true;
+    }
+
+    if (!parsed.equipment || parsed.equipment.length === 0) {
+      parsed.equipment = defaultEquipmentList;
       updated = true;
     }
 
@@ -425,7 +480,154 @@ app.post("/api/users/update-contract", authUser, adminOnly, (req, res) => {
   );
 
   saveDB(db);
-  res.json({ message: "تم تحديث بيانات عقد الموظف بنجاح" });
+  res.json({ message: "تم تحديث بيانات عقد العميل بنجاح" });
+});
+
+// --- EQUIPMENT MANAGEMENT API ---
+app.get("/api/equipment", authUser, (req, res) => {
+  const db = loadDB();
+  res.json(db.equipment || defaultEquipmentList);
+});
+
+app.post("/api/equipment", authUser, adminOnly, (req, res) => {
+  const { name, category, serial_number, notes } = req.body;
+  if (!name || !category) {
+    return res.status(400).json({ error: "اسم المعدة والتصنيف مطلوبان" });
+  }
+
+  const db = loadDB();
+  if (!db.equipment) db.equipment = [];
+
+  const newItem: EquipmentItem = {
+    id: "eq_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+    name,
+    category,
+    serial_number: serial_number || ("SN-" + Math.floor(100000 + Math.random() * 900000)),
+    status: "متاحة",
+    notes: notes || "",
+    created_at: new Date().toISOString()
+  };
+
+  db.equipment.unshift(newItem);
+
+  const admin = (req as any).user as UserProfile;
+  logAudit(db, admin.id, admin.email, "CREATE_EQUIPMENT", `تم إضافة معدة جديدة: ${name} (${category})`);
+
+  saveDB(db);
+  res.json(newItem);
+});
+
+app.post("/api/equipment/checkout", authUser, adminOnly, (req, res) => {
+  const { equipmentId, assigned_to_id, assigned_to_name, project_id, project_title, return_date, notes } = req.body;
+  if (!equipmentId || !assigned_to_name) {
+    return res.status(400).json({ error: "المعدة واسم الموظف التسليم مطلوبان" });
+  }
+
+  const db = loadDB();
+  if (!db.equipment) db.equipment = [];
+
+  const itemIndex = db.equipment.findIndex(e => e.id === equipmentId);
+  if (itemIndex === -1) {
+    return res.status(404).json({ error: "المعدة غير موجودة" });
+  }
+
+  db.equipment[itemIndex] = {
+    ...db.equipment[itemIndex],
+    status: "قيد الاستخدام",
+    assigned_to_id,
+    assigned_to_name,
+    project_id: project_id || "",
+    project_title: project_title || "",
+    checkout_date: new Date().toISOString().split("T")[0],
+    return_date: return_date || "",
+    notes: notes ? `${db.equipment[itemIndex].notes || ""} | تسليم: ${notes}` : db.equipment[itemIndex].notes
+  };
+
+  const admin = (req as any).user as UserProfile;
+  logAudit(db, admin.id, admin.email, "CHECKOUT_EQUIPMENT", `تم تسليم المعدة ${db.equipment[itemIndex].name} لـ ${assigned_to_name}`);
+
+  saveDB(db);
+  res.json(db.equipment[itemIndex]);
+});
+
+app.post("/api/equipment/return", authUser, adminOnly, (req, res) => {
+  const { equipmentId } = req.body;
+  if (!equipmentId) {
+    return res.status(400).json({ error: "معرف المعدة مطلوب" });
+  }
+
+  const db = loadDB();
+  if (!db.equipment) db.equipment = [];
+
+  const itemIndex = db.equipment.findIndex(e => e.id === equipmentId);
+  if (itemIndex === -1) {
+    return res.status(404).json({ error: "المعدة غير موجودة" });
+  }
+
+  const returnedName = db.equipment[itemIndex].name;
+  const returnedUser = db.equipment[itemIndex].assigned_to_name || "موظف";
+
+  db.equipment[itemIndex] = {
+    ...db.equipment[itemIndex],
+    status: "متاحة",
+    assigned_to_id: undefined,
+    assigned_to_name: undefined,
+    project_id: undefined,
+    project_title: undefined,
+    checkout_date: undefined,
+    return_date: undefined
+  };
+
+  const admin = (req as any).user as UserProfile;
+  logAudit(db, admin.id, admin.email, "RETURN_EQUIPMENT", `تم استلام وإعادة المعدة ${returnedName} من ${returnedUser}`);
+
+  saveDB(db);
+  res.json(db.equipment[itemIndex]);
+});
+
+app.put("/api/equipment/:id", authUser, adminOnly, (req, res) => {
+  const { id } = req.params;
+  const { name, category, serial_number, notes, status } = req.body;
+
+  const db = loadDB();
+  if (!db.equipment) db.equipment = [];
+
+  const itemIndex = db.equipment.findIndex(e => e.id === id);
+  if (itemIndex === -1) {
+    return res.status(404).json({ error: "المعدة غير موجودة" });
+  }
+
+  if (name) db.equipment[itemIndex].name = name;
+  if (category) db.equipment[itemIndex].category = category;
+  if (serial_number !== undefined) db.equipment[itemIndex].serial_number = serial_number;
+  if (notes !== undefined) db.equipment[itemIndex].notes = notes;
+  if (status) db.equipment[itemIndex].status = status;
+
+  const admin = (req as any).user as UserProfile;
+  logAudit(db, admin.id, admin.email, "UPDATE_EQUIPMENT", `تم تعديل بيانات المعدة: ${db.equipment[itemIndex].name}`);
+
+  saveDB(db);
+  res.json(db.equipment[itemIndex]);
+});
+
+app.delete("/api/equipment/:id", authUser, adminOnly, (req, res) => {
+  const { id } = req.params;
+  const db = loadDB();
+  if (!db.equipment) db.equipment = [];
+
+  const itemIndex = db.equipment.findIndex(e => e.id === id);
+  if (itemIndex === -1) {
+    return res.status(404).json({ error: "المعدة غير موجودة" });
+  }
+
+  const deletedName = db.equipment[itemIndex].name;
+  db.equipment.splice(itemIndex, 1);
+
+  const admin = (req as any).user as UserProfile;
+  logAudit(db, admin.id, admin.email, "DELETE_EQUIPMENT", `تم حذف المعدة: ${deletedName}`);
+
+  saveDB(db);
+  res.json({ message: "تم حذف المعدة بنجاح" });
 });
 
 app.post("/api/users/rate", authUser, adminOnly, (req, res) => {
@@ -467,31 +669,141 @@ app.get("/api/clients", authUser, adminOnly, (req, res) => {
 });
 
 app.post("/api/clients", authUser, adminOnly, (req, res) => {
-  const { name, phone, email, business_type, notes, contract_url, contract_status } = req.body;
+  const { name, phone, email, business_type, notes, contract_url, contract_status, create_account, portal_password } = req.body;
   if (!name || !phone || !email || !business_type) {
     return res.status(400).json({ error: "يرجى تعبئة جميع الحقول الإجبارية للعميل" });
   }
 
   const db = loadDB();
+  const normalizedEmail = email.trim().toLowerCase();
+
+  const clientId = "clt_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
   const newClient: ClientProfile = {
-    id: "clt_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+    id: clientId,
     name,
     phone,
-    email,
+    email: normalizedEmail,
     business_type: business_type || "",
     notes: notes || "",
     contract_url: contract_url || "",
     contract_status: contract_status || "قيد التوقيع",
-    created_at: new Date().toISOString()
+    created_at: new Date().toISOString(),
+    has_account: false
   };
+
+  if (create_account && portal_password) {
+    newClient.has_account = true;
+    newClient.password = portal_password;
+    const clientUserId = "clt_user_" + clientId;
+    newClient.account_id = clientUserId;
+
+    // Create user record in db.users for login
+    const existingUserIndex = db.users.findIndex(u => u.email.trim().toLowerCase() === normalizedEmail);
+    const clientUser: UserProfile & { password?: string } = {
+      id: clientUserId,
+      email: normalizedEmail,
+      password: portal_password,
+      role: "client",
+      status: "Approved",
+      fullName: name,
+      phone,
+      specialization: "عميل",
+      bio: `حساب عميل معتمد - ${business_type}`,
+      rating: 5,
+      client_id: clientId,
+      created_at: new Date().toISOString()
+    };
+
+    if (existingUserIndex >= 0) {
+      db.users[existingUserIndex] = { ...db.users[existingUserIndex], ...clientUser };
+    } else {
+      db.users.push(clientUser);
+    }
+  }
 
   db.clients.push(newClient);
 
   const admin = (req as any).user as UserProfile;
-  logAudit(db, admin.id, admin.email, "CREATE_CLIENT", `تم إنشاء عميل جديد: ${name} (${email})`);
+  logAudit(db, admin.id, admin.email, "CREATE_CLIENT", `تم إنشاء عميل جديد: ${name} (${normalizedEmail})` + (create_account ? " وتفعيل حساب البوابة" : ""));
 
   saveDB(db);
   res.json(newClient);
+});
+
+// Save or Update Client Portal Account Credentials
+app.post("/api/clients/:id/account", authUser, adminOnly, (req, res) => {
+  const { id } = req.params;
+  const { password } = req.body;
+  if (!password) {
+    return res.status(400).json({ error: "كلمة المرور مطلوبـة" });
+  }
+
+  const db = loadDB();
+  const clientIndex = db.clients.findIndex(c => c.id === id);
+  if (clientIndex === -1) {
+    return res.status(404).json({ error: "العميل غير موجود" });
+  }
+
+  const client = db.clients[clientIndex];
+  const normalizedEmail = client.email.trim().toLowerCase();
+  const clientUserId = client.account_id || ("clt_user_" + client.id);
+
+  client.has_account = true;
+  client.password = password;
+  client.account_id = clientUserId;
+
+  const existingUserIndex = db.users.findIndex(u => u.id === clientUserId || u.email.trim().toLowerCase() === normalizedEmail);
+  const clientUser: UserProfile & { password?: string } = {
+    id: clientUserId,
+    email: normalizedEmail,
+    password: password,
+    role: "client",
+    status: "Approved",
+    fullName: client.name,
+    phone: client.phone,
+    specialization: "عميل",
+    bio: `حساب عميل معتمد - ${client.business_type || "عميل الوكالة"}`,
+    rating: 5,
+    client_id: client.id,
+    created_at: client.created_at || new Date().toISOString()
+  };
+
+  if (existingUserIndex >= 0) {
+    db.users[existingUserIndex] = { ...db.users[existingUserIndex], ...clientUser };
+  } else {
+    db.users.push(clientUser);
+  }
+
+  const admin = (req as any).user as UserProfile;
+  logAudit(db, admin.id, admin.email, "SAVE_CLIENT_ACCOUNT", `تم حفظ وتفعيل حساب دخول العميل ${client.name} (${normalizedEmail})`);
+
+  saveDB(db);
+  res.json({ message: "تم حفظ وتفعيل حساب العميل بنجاح", client });
+});
+
+// Delete Client Portal Account (Revoke Login Credentials)
+app.delete("/api/clients/:id/account", authUser, adminOnly, (req, res) => {
+  const { id } = req.params;
+  const db = loadDB();
+  const clientIndex = db.clients.findIndex(c => c.id === id);
+  if (clientIndex === -1) {
+    return res.status(404).json({ error: "العميل غير موجود" });
+  }
+
+  const client = db.clients[clientIndex];
+  const normalizedEmail = client.email.trim().toLowerCase();
+
+  client.has_account = false;
+  client.password = undefined;
+
+  // Remove client user from db.users
+  db.users = db.users.filter(u => !(u.client_id === id || u.email.trim().toLowerCase() === normalizedEmail && u.role === "client"));
+
+  const admin = (req as any).user as UserProfile;
+  logAudit(db, admin.id, admin.email, "DELETE_CLIENT_ACCOUNT", `تم إلغاء وحذف حساب الدخول للعميل ${client.name}`);
+
+  saveDB(db);
+  res.json({ message: "تم إلغاء حساب الدخول للعميل بنجاح", client });
 });
 
 app.post("/api/clients/update-contract", authUser, adminOnly, (req, res) => {
@@ -531,7 +843,11 @@ app.delete("/api/clients/:id", authUser, adminOnly, (req, res) => {
   }
 
   const clientName = db.clients[clientIndex].name;
+  const clientEmail = db.clients[clientIndex].email.trim().toLowerCase();
   db.clients.splice(clientIndex, 1);
+
+  // Clean up user account if existed
+  db.users = db.users.filter(u => !(u.client_id === id || u.email.trim().toLowerCase() === clientEmail && u.role === "client"));
 
   const admin = (req as any).user as UserProfile;
   logAudit(db, admin.id, admin.email, "DELETE_CLIENT", `تم حذف العميل ${clientName}`);
@@ -982,6 +1298,30 @@ app.post("/api/notifications/read-all", authUser, (req, res) => {
 
   saveDB(db);
   res.json({ message: "تم قراءة كافة التنبيهات" });
+});
+
+app.post("/api/notifications/:id/read", authUser, (req, res) => {
+  const { id } = req.params;
+  const user = (req as any).user as UserProfile;
+  const db = loadDB();
+
+  const notifIndex = db.notifications.findIndex(n => n.id === id && n.user_id === user.id);
+  if (notifIndex !== -1) {
+    db.notifications[notifIndex].is_read = true;
+    saveDB(db);
+  }
+
+  res.json({ message: "تم تحديث الإشعار" });
+});
+
+app.delete("/api/notifications/clear", authUser, (req, res) => {
+  const user = (req as any).user as UserProfile;
+  const db = loadDB();
+
+  db.notifications = db.notifications.filter(n => n.user_id !== user.id);
+
+  saveDB(db);
+  res.json({ message: "تم مسح كافة التنبيهات بنجاح" });
 });
 
 // --- GOOGLE SIMULATED AUTH PAGE ---

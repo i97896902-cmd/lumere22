@@ -8,6 +8,7 @@ import {
   LogOut,
   HelpCircle,
   Activity,
+  Camera,
   X
 } from "lucide-react";
 import { UserProfile } from "../types";
@@ -43,6 +44,12 @@ export default function Sidebar({ user, activeTab, setActiveTab, onLogout, isOpe
       label: isClient ? "مشاريعي ومخرجاتها" : "المشاريع والمهام",
       icon: <FolderKanban className="w-5 h-5" />,
       allowed: true, // Employees and Clients see their own projects and tasks
+    },
+    {
+      id: "equipment",
+      label: "معدات الإنتاج",
+      icon: <Camera className="w-5 h-5" />,
+      allowed: !isClient,
     },
     {
       id: "employees",
