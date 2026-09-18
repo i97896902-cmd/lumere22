@@ -215,7 +215,9 @@ export default function App() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const isLocalRecordId = (id: string) => /^(local_|mock_|clt_|user_)/.test(id) || [
+  // Supabase record IDs are UUIDs. Any other ID belongs to the local/demo cache
+  // and must never be sent to an RPC parameter typed as UUID.
+  const isLocalRecordId = (id: string) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) || [
     "ibrahim-mohamed-id-97896902",
     "mohamed-user-id",
     "ghareb-user-id"
@@ -1086,7 +1088,10 @@ export default function App() {
     }
 
     const localTasks = JSON.parse(localStorage.getItem("local_tasks_bypass") || "[]");
-    if (!localTasks.some((t: any) => t.project_id === demoProjId)) {
+    // Seed the demo tasks only once. Otherwise, deleting every demo task would
+    // cause all of them to be recreated after the next app reload.
+    const demoTasksInitialized = localStorage.getItem("lumere_demo_tasks_initialized") === "true";
+    if (!demoTasksInitialized && !localTasks.some((t: any) => t.project_id === demoProjId)) {
       localTasks.unshift(
         {
           id: "task_demo_1",
@@ -1138,6 +1143,9 @@ export default function App() {
         }
       );
       localStorage.setItem("local_tasks_bypass", JSON.stringify(localTasks));
+    }
+    if (!demoTasksInitialized) {
+      localStorage.setItem("lumere_demo_tasks_initialized", "true");
     }
   }, []);
 
@@ -2675,17 +2683,14 @@ export default function App() {
   const handleDeleteTask = async (taskId: string) => {
     showConfirm("هل تريد حذف هذه المهمة نهائياً؟", async () => {
       try {
-        const { error } = isLocalRecordId(taskId)
-          ? { error: null }
-          : await supabase.rpc("admin_delete_record", { p_table: "tasks", p_id: taskId });
-        if (error) {
-          if (isLocalRecordId(taskId) && user && user.role === "admin") {
-            const localTasks = JSON.parse(localStorage.getItem("local_tasks_bypass") || "[]");
-            const filtered = localTasks.filter((t: any) => t.id !== taskId);
-            localStorage.setItem("local_tasks_bypass", JSON.stringify(filtered));
-            showToast("تم حذف المهمة الفنية بنجاح (تخطي أمني معتمد لأدمن النظام) ✔️", "success");
-          } else throw error;
+        if (isLocalRecordId(taskId)) {
+          const localTasks = JSON.parse(localStorage.getItem("local_tasks_bypass") || "[]");
+          const filtered = localTasks.filter((t: any) => t.id !== taskId);
+          localStorage.setItem("local_tasks_bypass", JSON.stringify(filtered));
+          showToast("تم حذف المهمة الفنية بنجاح", "success");
         } else {
+          const { error } = await supabase.rpc("admin_delete_record", { p_table: "tasks", p_id: taskId });
+          if (error) throw error;
           showToast("تم حذف المهمة الفنية بنجاح", "success");
         }
         setTasks(prev => prev.filter(task => task.id !== taskId));
