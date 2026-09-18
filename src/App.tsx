@@ -3,7 +3,7 @@ import {
   Users, FolderKanban, WalletCards, User, LogOut, Bell, BellRing, Plus, CheckCircle, 
   X, Trash2, Search, FileText, Send, Eye, ShieldAlert, FileSignature, 
   HelpCircle, CreditCard, TrendingUp, AlertCircle, Printer, Download, Loader2, Key,
-  AlertTriangle, Clock, Flame, Menu, Sun, Moon
+  AlertTriangle, Clock, Flame, Menu
 } from "lucide-react";
 import { 
   UserProfile, ClientProfile, Project, Task, FinanceTransaction, 
@@ -35,16 +35,6 @@ const normalizeUserRole = (value: unknown): UserRole => {
 };
 
 export default function App() {
-  const [theme, setTheme] = useState<"dark" | "light">(() => {
-    if (typeof window === "undefined") return "dark";
-    const savedTheme = localStorage.getItem("lumere_theme");
-    return savedTheme === "light" ? "light" : "dark";
-  });
-
-  useEffect(() => {
-    document.documentElement.classList.toggle("theme-light", theme === "light");
-    localStorage.setItem("lumere_theme", theme);
-  }, [theme]);
 
   // Auth state
   const [user, setUser] = useState<UserProfile | null>(() => {
@@ -3473,17 +3463,6 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3 sm:gap-4">
-            <button
-              type="button"
-              onClick={() => setTheme(currentTheme => currentTheme === "dark" ? "light" : "dark")}
-              className="p-2 rounded-xl text-neutral-400 hover:text-blue-400 bg-neutral-900 hover:bg-neutral-850 border border-neutral-800 transition"
-              title={theme === "dark" ? "تفعيل الوضع النهاري" : "تفعيل الوضع الليلي"}
-              aria-label={theme === "dark" ? "تفعيل الوضع النهاري" : "تفعيل الوضع الليلي"}
-              aria-pressed={theme === "light"}
-            >
-              {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </button>
-
             {/* Notification Center */}
             <div className="relative">
               <div className="flex items-center gap-1.5">
