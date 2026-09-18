@@ -5,8 +5,14 @@ import App from './App.tsx';
 import ErrorBoundary from './components/ErrorBoundary.tsx';
 import './index.css';
 
-// Automatically register PWA Service Worker
-registerSW({ immediate: true });
+// Activate a new deployment as soon as it is available, preventing the PWA
+// shell from requesting JavaScript chunks from an older deployment.
+const updateServiceWorker = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    updateServiceWorker(true);
+  },
+});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

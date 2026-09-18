@@ -215,9 +215,15 @@ export default function App() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const deletedLocalRecordIds = () => new Set<string>(
-    JSON.parse(localStorage.getItem("lumere_deleted_local_record_ids") || "[]")
-  );
+  const deletedLocalRecordIds = () => {
+    try {
+      const storedIds: unknown = JSON.parse(localStorage.getItem("lumere_deleted_local_record_ids") || "[]");
+      return new Set<string>(Array.isArray(storedIds) ? storedIds.filter((id): id is string => typeof id === "string") : []);
+    } catch {
+      // A corrupted browser cache must not prevent the application from loading.
+      return new Set<string>();
+    }
+  };
 
   const wasLocalRecordDeleted = (id: string) => deletedLocalRecordIds().has(id);
 
