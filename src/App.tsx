@@ -616,12 +616,18 @@ export default function App() {
       ];
       setPayroll(mappedPayroll);
 
-      // Fetch Equipment List
+      // Equipment is stored in Supabase. The legacy Express equipment routes are
+      // not deployed with the public frontend, so querying them causes a 404.
       let equipmentData: EquipmentItem[] = [];
       try {
-        equipmentData = await apiFetch("/api/equipment");
+        const { data, error } = await supabase
+          .from("equipment")
+          .select("*")
+          .order("created_at", { ascending: false });
+        if (error) throw error;
+        equipmentData = (data || []) as EquipmentItem[];
       } catch (eqErr) {
-        console.warn("Equipment fetch via API fallback:", eqErr);
+        console.error("Equipment fetch failed:", eqErr);
       }
       setEquipment(equipmentData);
 
@@ -2406,10 +2412,12 @@ export default function App() {
   // --- EQUIPMENT MANAGEMENT HANDLERS ---
   const handleAddEquipment = async (itemData: { name: string; category: EquipmentCategory; serial_number: string; notes: string }) => {
     try {
-      const newItem = await apiFetch("/api/equipment", {
-        method: "POST",
-        body: JSON.stringify(itemData)
-      });
+      const { data: newItem, error } = await supabase
+        .from("equipment")
+        .insert({ ...itemData, status: "متاحة" })
+        .select()
+        .single();
+      if (error) throw error;
       setEquipment(prev => [newItem, ...prev]);
     } catch (err: any) {
       showToast(err.message || "فشل إضافة المعدة", "error");
@@ -2419,10 +2427,19 @@ export default function App() {
 
   const handleEditEquipment = async (item: EquipmentItem) => {
     try {
-      const updated = await apiFetch(`/api/equipment/${item.id}`, {
-        method: "PUT",
-        body: JSON.stringify(item)
-      });
+      const { data: updated, error } = await supabase
+        .from("equipment")
+        .update({
+          name: item.name,
+          category: item.category,
+          serial_number: item.serial_number,
+          status: item.status,
+          notes: item.notes || ""
+        })
+        .eq("id", item.id)
+        .select()
+        .single();
+      if (error) throw error;
       setEquipment(prev => prev.map(e => e.id === item.id ? updated : e));
     } catch (err: any) {
       showToast(err.message || "فشل تعديل المعدة", "error");
@@ -2432,10 +2449,22 @@ export default function App() {
 
   const handleCheckoutEquipment = async (checkoutData: any) => {
     try {
-      const updated = await apiFetch("/api/equipment/checkout", {
-        method: "POST",
-        body: JSON.stringify(checkoutData)
-      });
+      const { data: updated, error } = await supabase
+        .from("equipment")
+        .update({
+          status: "قيد الاستخدام",
+          assigned_to_id: isLocalRecordId(checkoutData.assigned_to_id) ? null : checkoutData.assigned_to_id,
+          assigned_to_name: checkoutData.assigned_to_name,
+          project_id: !checkoutData.project_id || isLocalRecordId(checkoutData.project_id) ? null : checkoutData.project_id,
+          project_title: checkoutData.project_title || null,
+          checkout_date: new Date().toISOString().slice(0, 10),
+          return_date: checkoutData.return_date,
+          notes: checkoutData.notes || ""
+        })
+        .eq("id", checkoutData.equipmentId)
+        .select()
+        .single();
+      if (error) throw error;
       setEquipment(prev => prev.map(e => e.id === checkoutData.equipmentId ? updated : e));
     } catch (err: any) {
       showToast(err.message || "فشل تسليم المعدة", "error");
@@ -2445,10 +2474,21 @@ export default function App() {
 
   const handleReturnEquipment = async (equipmentId: string) => {
     try {
-      const updated = await apiFetch("/api/equipment/return", {
-        method: "POST",
-        body: JSON.stringify({ equipmentId })
-      });
+      const { data: updated, error } = await supabase
+        .from("equipment")
+        .update({
+          status: "متاحة",
+          assigned_to_id: null,
+          assigned_to_name: null,
+          project_id: null,
+          project_title: null,
+          checkout_date: null,
+          return_date: null
+        })
+        .eq("id", equipmentId)
+        .select()
+        .single();
+      if (error) throw error;
       setEquipment(prev => prev.map(e => e.id === equipmentId ? updated : e));
     } catch (err: any) {
       showToast(err.message || "فشل إرجاع المعدة", "error");
@@ -2458,9 +2498,8 @@ export default function App() {
 
   const handleDeleteEquipment = async (equipmentId: string) => {
     try {
-      await apiFetch(`/api/equipment/${equipmentId}`, {
-        method: "DELETE"
-      });
+      const { error } = await supabase.from("equipment").delete().eq("id", equipmentId);
+      if (error) throw error;
       setEquipment(prev => prev.filter(e => e.id !== equipmentId));
     } catch (err: any) {
       showToast(err.message || "فشل حذف المعدة", "error");
