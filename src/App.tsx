@@ -215,6 +215,18 @@ export default function App() {
     setTimeout(() => setToast(null), 4000);
   };
 
+  const deletedLocalRecordIds = () => new Set<string>(
+    JSON.parse(localStorage.getItem("lumere_deleted_local_record_ids") || "[]")
+  );
+
+  const wasLocalRecordDeleted = (id: string) => deletedLocalRecordIds().has(id);
+
+  const rememberDeletedLocalRecords = (...ids: string[]) => {
+    const deletedIds = deletedLocalRecordIds();
+    ids.filter(Boolean).forEach(id => deletedIds.add(id));
+    localStorage.setItem("lumere_deleted_local_record_ids", JSON.stringify([...deletedIds]));
+  };
+
   // Supabase record IDs are UUIDs. Any other ID belongs to the local/demo cache
   // and must never be sent to an RPC parameter typed as UUID.
   const isLocalRecordId = (id: string) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) || [
@@ -957,6 +969,7 @@ export default function App() {
 
     const seedLocalUser = (email: string, pass: string | null, profileData: any) => {
       const cleanEmail = email.trim().toLowerCase();
+      if (wasLocalRecordDeleted(profileData.id)) return;
       
       // Employee passwords must remain in Supabase Auth, never in browser storage.
       const localCredentials = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
@@ -1054,7 +1067,7 @@ export default function App() {
     );
 
     const localClients = JSON.parse(localStorage.getItem("local_clients_bypass") || "[]");
-    if (!localClients.some((c: any) => c.id === demoClientId || c.email === demoClientEmail)) {
+    if (!wasLocalRecordDeleted(demoClientId) && !localClients.some((c: any) => c.id === demoClientId || c.email === demoClientEmail)) {
       localClients.unshift({
         id: demoClientId,
         name: "شركة الفارس للإنتاج والتجارة",
@@ -1072,7 +1085,7 @@ export default function App() {
 
     const localProjects = JSON.parse(localStorage.getItem("local_projects_bypass") || "[]");
     const demoProjId = "proj_demo_alfares_1";
-    if (!localProjects.some((p: any) => p.id === demoProjId)) {
+    if (!wasLocalRecordDeleted(demoProjId) && !localProjects.some((p: any) => p.id === demoProjId)) {
       localProjects.unshift({
         id: demoProjId,
         client_id: demoClientId,
@@ -1768,7 +1781,7 @@ export default function App() {
   const handleDeleteEmployee = async (employeeId: string) => {
     showConfirm("هل أنت متأكد من رغبتك في حذف هذا الموظف نهائياً من قاعدة البيانات والنظام؟", async () => {
       try {
-        try {
+        if (!isLocalRecordId(employeeId)) {
           const { error } = await supabase.rpc("delete_employee_account", {
             target_user_id: employeeId
           });
@@ -1778,9 +1791,6 @@ export default function App() {
             }
             throw error;
           }
-        } catch (dbErr) {
-          if (!employeeId.startsWith("mock_") && !employeeId.includes("-user-id")) throw dbErr;
-          console.warn("Local-only employee deletion:", dbErr);
         }
 
         // Delete from local storage backup
@@ -1792,6 +1802,7 @@ export default function App() {
           if (record?.profile?.id === employeeId) delete localCredentials[email];
         });
         localStorage.setItem("local_profiles_credentials", JSON.stringify(localCredentials));
+        if (isLocalRecordId(employeeId)) rememberDeletedLocalRecords(employeeId);
 
         showToast("تم حذف الموظف بنجاح من النظام 🗑️", "success");
         loadAllData();
@@ -2259,7 +2270,7 @@ export default function App() {
     const cleanEmail = targetClient.email?.trim().toLowerCase();
     showConfirm(`هل أنت متأكد من رغبتك في حذف ملف العميل (${targetClient.name}) وحسابه بالكامل من النظام؟`, async () => {
       try {
-        // 0. Delete via Backend API
+        // 0. Delete via Backend API (if the deployed API has a copy of this client).
         if (!isLocalRecordId(targetClient.id)) {
           try {
             await apiFetch(`/api/clients/${targetClient.id}`, { method: "DELETE" });
@@ -2268,12 +2279,9 @@ export default function App() {
           }
         }
 
-        // 1. Delete from Supabase clients table
-        try {
-            if (!isLocalRecordId(targetClient.id)) await deleteAdminRecord("clients", targetClient.id);
-        } catch (dbErr) {
-          console.warn("DB client deletion fallback:", dbErr);
-        }
+        // 1. Delete from the authoritative online database. Do not report a
+        // successful deletion if the record would still be returned on refresh.
+        if (!isLocalRecordId(targetClient.id)) await deleteAdminRecord("clients", targetClient.id);
 
         // 2. Delete from Supabase profiles if portal user account exists
         try {
@@ -2312,6 +2320,9 @@ export default function App() {
           (!cleanEmail || p.email?.toLowerCase().trim() !== cleanEmail)
         );
         localStorage.setItem("local_profiles_bypass", JSON.stringify(filteredProfiles));
+        if (isLocalRecordId(targetClient.id)) {
+          rememberDeletedLocalRecords(targetClient.id, `user_${targetClient.id}`);
+        }
 
         // 6. Optimistic state update
         setClients(prev => prev.filter(c => c.id !== targetClient.id));
@@ -2687,6 +2698,7 @@ export default function App() {
           const localTasks = JSON.parse(localStorage.getItem("local_tasks_bypass") || "[]");
           const filtered = localTasks.filter((t: any) => t.id !== taskId);
           localStorage.setItem("local_tasks_bypass", JSON.stringify(filtered));
+          rememberDeletedLocalRecords(taskId);
           showToast("تم حذف المهمة الفنية بنجاح", "success");
         } else {
           const { error } = await supabase.rpc("admin_delete_record", { p_table: "tasks", p_id: taskId });
