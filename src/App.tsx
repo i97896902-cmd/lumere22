@@ -14,6 +14,7 @@ import {
 import { createClient } from "@supabase/supabase-js";
 import { apiFetch } from "./lib/api";
 import { supabase } from "./lib/supabaseClient";
+import RealtimeChannel from "@supabase/supabase-js/dist/module/lib/RealtimeChannel";
 import ContractPreviewModal from "./components/ContractPreviewModal";
 import Sidebar from "./components/Sidebar";
 import StressTestDashboard from "./components/StressTestDashboard";
@@ -96,6 +97,9 @@ export default function App() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showNotificationModal, setShowNotificationModal] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
+  // Realtime subscription for notifications
+  const [notificationChannel, setNotificationChannel] = useState<RealtimeChannel | null>(null);
 
   // Search/Filter states
   const [clientSearch, setClientSearch] = useState("");
@@ -292,6 +296,44 @@ export default function App() {
       console.warn(`Ignoring corrupted localStorage entry: ${key}`);
       localStorage.removeItem(key);
       return fallback;
+    }
+  };
+
+  // Fetch notifications from database (with Realtime support)
+  const fetchNotifications = async (isInitialLoad: boolean = false) => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      
+      const mappedNotifications: AppNotification[] = (data || []).map(n => ({
+        id: n.id,
+        user_id: n.user_id,
+        title: n.title,
+        message: n.message,
+        is_read: n.is_read,
+        created_at: n.created_at,
+        type: n.type as "urgent_deadline" | "delivery" | "info",
+        project_id: n.project_id,
+        days_left: n.days_left
+      }));
+
+      if (isInitialLoad) {
+        setNotifications(mappedNotifications);
+      } else {
+        // For realtime updates, merge with existing (avoid duplicates)
+        setNotifications(prev => {
+          const existingIds = new Set(prev.map(n => n.id));
+          const newOnes = mappedNotifications.filter(n => !existingIds.has(n.id));
+          return [...newOnes, ...prev].slice(0, 50);
+        });
+      }
+    } catch (err) {
+      console.error("Notifications fetch failed:", err);
     }
   };
 
@@ -644,108 +686,11 @@ export default function App() {
       }
       setEquipment(equipmentData);
 
-      // 7. Dynamic Notifications & Urgent Project Deadlines System
-      const activeNotifications: AppNotification[] = [];
-
-      const now = new Date();
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-      // A) Urgent Deadline Alerts for Projects near deadline (< 3 days or overdue)
-      mappedProjects.forEach(p => {
-        if (!p.deadline) return;
-        const deadlineDate = new Date(p.deadline);
-        if (isNaN(deadlineDate.getTime())) return;
-
-        // Check if all tasks in this project are completed
-        const projectTasks = mappedTasks.filter(t => t.project_id === p.id);
-        const allCompleted = projectTasks.length > 0 && projectTasks.every(t => t.status === "Completed");
-        if (allCompleted) return; // All tasks completed, no alert needed
-
-        const targetDay = new Date(deadlineDate.getFullYear(), deadlineDate.getMonth(), deadlineDate.getDate());
-        const diffTime = targetDay.getTime() - today.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-        if (diffDays < 3) {
-          let deadlineMsg = "";
-          let urgencyPrefix = "";
-          if (diffDays < 0) {
-            const overdueDays = Math.abs(diffDays);
-            urgencyPrefix = "🚨 تأخير تسليم";
-            deadlineMsg = `مشروع (${p.title}) تجاوز موعد التسليم بـ ${overdueDays === 1 ? "يوم واحد" : `${overdueDays} أيام`} (تاريخ التسليم: ${p.deadline}) - العميل: ${p.client_name}`;
-          } else if (diffDays === 0) {
-            urgencyPrefix = "🔥 تسليم اليوم";
-            deadlineMsg = `اليوم هو الموعد النهائي لتسليم مشروع (${p.title}) المجدول بتاريخ ${p.deadline} - العميل: ${p.client_name}`;
-          } else if (diffDays === 1) {
-            urgencyPrefix = "⏳ متبقي يوم واحد";
-            deadlineMsg = `متبقي يوم واحد فقط على موعد تسليم مشروع (${p.title}) بتاريخ ${p.deadline} - العميل: ${p.client_name}`;
-          } else if (diffDays === 2) {
-            urgencyPrefix = "⚠️ متبقي يومان";
-            deadlineMsg = `متبقي يومان فقط على موعد تسليم مشروع (${p.title}) بتاريخ ${p.deadline} - العميل: ${p.client_name}`;
-          }
-
-          activeNotifications.push({
-            id: "deadline_proj_" + p.id,
-            user_id: "admin",
-            title: `${urgencyPrefix}: ${p.title}`,
-            message: deadlineMsg,
-            is_read: false,
-            created_at: new Date().toISOString(),
-            type: "urgent_deadline",
-            project_id: p.id,
-            days_left: diffDays
-          });
-        }
-      });
-
-      // B) Task assignment notifications for the assigned employee.
-      // Each employee only receives notifications addressed to their own user id, so the
-      // id has to include the assignee — otherwise two employees sharing a task id would
-      // collide in the list.
-      if (user && user.role === "employee") {
-        const myEmail = (user.email || "").toLowerCase().trim();
-        mappedTasks.filter(t =>
-          t.assigned_to_id === user.id ||
-          (!!t.assigned_to_email && t.assigned_to_email === myEmail)
-        ).forEach(t => {
-          const isDelivered = t.status === "Completed";
-          activeNotifications.push({
-            id: `task_${t.id}_${user.id}`,
-            user_id: user.id,
-            title: isDelivered ? "تم تسليم مهمتك ✅" : "مهمة جديدة موكلة إليك 📋",
-            message: isDelivered
-              ? `تم تسليم مهمة "${t.title}" في مشروع "${t.project_title}" بنجاح.`
-              : `تم تكليفك بمهمة "${t.title}" في مشروع "${t.project_title}" (العميل: ${mappedProjects.find(p => p.id === t.project_id)?.client_name || "غير محدد"}) — آخر موعد للتسليم: ${t.deadline || "غير محدد"}`,
-            is_read: false,
-            created_at: t.created_at,
-            type: "info",
-            project_id: t.project_id
-          });
-        });
+      // 7. Fetch notifications from database (replaces client-side generation)
+      // Notifications are now created via database trigger when tasks are assigned/updated
+      if (!isPoll) {
+        await fetchNotifications(true);
       }
-
-      // C) Task delivery notifications for admins
-      mappedTasks.filter(t => t.status === "Completed" && t.delivery_notes).forEach(t => {
-        activeNotifications.push({
-          id: "notif_" + t.id,
-          user_id: "admin",
-          title: "تسليم مهمة فنية 📥",
-          message: `الموظف سلم مهمة "${t.title}" في مشروع "${t.project_title}"`,
-          is_read: false,
-          created_at: t.created_at,
-          type: "delivery"
-        });
-      });
-
-      // Prioritize urgent deadline notifications at the top, then unread, then recent
-      activeNotifications.sort((a, b) => {
-        if (a.type === "urgent_deadline" && b.type !== "urgent_deadline") return -1;
-        if (b.type === "urgent_deadline" && a.type !== "urgent_deadline") return 1;
-        if (!a.is_read && b.is_read) return -1;
-        if (!b.is_read && a.is_read) return 1;
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-      });
-
-      setNotifications(activeNotifications);
 
     } catch (err: any) {
       console.error("Error loading data from Supabase:", err);
@@ -765,9 +710,63 @@ export default function App() {
   useEffect(() => {
     if (user) {
       loadAllData(false);
-      // Periodically poll for notifications & tasks updates silently
-      const interval = setInterval(() => loadAllData(true), 8000);
-      return () => clearInterval(interval);
+      
+      // Set up Supabase Realtime subscription for notifications
+      const channel = supabase
+        .channel('notifications_changes')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${user.id}`
+          },
+          (payload) => {
+            if (payload.eventType === 'INSERT') {
+              const newNotif = payload.new as any;
+              setNotifications(prev => {
+                // Avoid duplicates
+                if (prev.some(n => n.id === newNotif.id)) return prev;
+                return [{
+                  id: newNotif.id,
+                  user_id: newNotif.user_id,
+                  title: newNotif.title,
+                  message: newNotif.message,
+                  is_read: newNotif.is_read,
+                  created_at: newNotif.created_at,
+                  type: newNotif.type as "urgent_deadline" | "delivery" | "info",
+                  project_id: newNotif.project_id,
+                  days_left: newNotif.days_left
+                }, ...prev].slice(0, 50);
+              });
+              // Play notification sound
+              const { playNotificationSound } = require("./lib/notifications");
+              playNotificationSound();
+            } else if (payload.eventType === 'UPDATE') {
+              const updatedNotif = payload.new as any;
+              setNotifications(prev => prev.map(n => 
+                n.id === updatedNotif.id ? { ...n, is_read: updatedNotif.is_read } : n
+              ));
+            } else if (payload.eventType === 'DELETE') {
+              const deletedId = payload.old.id;
+              setNotifications(prev => prev.filter(n => n.id !== deletedId));
+            }
+          }
+        )
+        .subscribe();
+      
+      setNotificationChannel(channel);
+
+      // Periodically poll for tasks updates (notifications come via Realtime)
+      const interval = setInterval(() => loadAllData(true), 30000);
+      
+      return () => {
+        clearInterval(interval);
+        if (channel) {
+          supabase.removeChannel(channel);
+        }
+      };
     }
   }, [user]);
 
@@ -1739,6 +1738,11 @@ export default function App() {
     } catch (err) {
       console.error("Error signing out from Supabase:", err);
     }
+    // Cleanup Realtime channel
+    if (notificationChannel) {
+      supabase.removeChannel(notificationChannel);
+      setNotificationChannel(null);
+    }
     localStorage.removeItem("lumere_user");
     setUser(null);
     setActiveTab("dashboard");
@@ -2166,11 +2170,16 @@ export default function App() {
   // Notifications Handlers
   const handleMarkNotificationRead = async (id: string) => {
     try {
-      await apiFetch(`/api/notifications/${id}/read`, { method: "POST" });
+      // Update in database
+      const { error } = await supabase
+        .from("notifications")
+        .update({ is_read: true })
+        .eq("id", id);
+      if (error) throw error;
     } catch (err) {
-      console.warn("Read notification API fallback:", err);
+      console.warn("Mark notification read failed:", err);
     }
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+    // Local state will be updated via Realtime subscription
   };
 
   const handleClearNotifications = async () => {
@@ -3077,11 +3086,17 @@ export default function App() {
   // Read all notifications
   const handleReadAllNotifications = async () => {
     try {
-      await apiFetch("/api/notifications/read-all", { method: "POST" });
+      // Update all unread notifications for current user in database
+      const { error } = await supabase
+        .from("notifications")
+        .update({ is_read: true })
+        .eq("user_id", user?.id)
+        .eq("is_read", false);
+      if (error) throw error;
     } catch (err: any) {
-      console.warn("Read all notifications API fallback:", err);
+      console.warn("Read all notifications failed:", err);
     }
-    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    // Local state will be updated via Realtime subscription
     showToast("تم قراءة جميع التنبيهات", "success");
   };
 
