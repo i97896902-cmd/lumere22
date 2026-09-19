@@ -71,6 +71,9 @@ export interface Task {
   title: string;
   assigned_to_id: string;
   assigned_to_name: string;
+  // Kept alongside assigned_to_id so a task still resolves to its owner when the id
+  // stored in Supabase does not match the id the employee signed in with.
+  assigned_to_email?: string;
   status: TaskStatus;
   deadline: string;
   delivery_notes?: string; // Notes written by employee upon marking completed

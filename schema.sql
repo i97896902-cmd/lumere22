@@ -79,11 +79,15 @@ DO $$ BEGIN
 END $$;
 
 -- 4. TASKS Table
+-- assigned_to_id is TEXT, not UUID REFERENCES profiles(id): staff accounts created outside
+-- Supabase Auth use non-UUID ids, and the FK rejected tasks assigned to them (the admin UI
+-- then silently fell back to localStorage, so the employee saw neither task nor alert).
 CREATE TABLE IF NOT EXISTS tasks (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
-  assigned_to_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  assigned_to_id TEXT,
+  assigned_email TEXT,
   status TEXT DEFAULT 'Pending' CHECK (status IN ('Pending', 'In Progress', 'Review', 'Completed', 'Canceled', 'Rejected', 'Revisions')),
   delivery_notes TEXT,
   deadline DATE,

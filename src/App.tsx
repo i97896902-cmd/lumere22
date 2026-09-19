@@ -530,6 +530,11 @@ export default function App() {
         ...tasksData.map(t => {
           const proj = mappedProjects.find(p => p.id === t.project_id);
           const emp = approvedUsers.find(e => e.id === t.assigned_to_id);
+          // Supabase is not guaranteed to hold a profile row for every seeded staff member
+          // (and seeded ids are not UUIDs), so a raw assigned_to_id can point at nobody and
+          // the employee would never see the task. Store the assignee's email alongside the
+          // id so authorship can still be resolved by email when the id lookup misses.
+          const assignedEmail = (t.assigned_email || emp?.email || "").toLowerCase().trim();
           return {
             id: t.id,
             project_id: t.project_id,
@@ -537,6 +542,7 @@ export default function App() {
             title: t.title,
             assigned_to_id: t.assigned_to_id,
             assigned_to_name: emp ? (emp.fullName || emp.email.split("@")[0]) : "موظف مجهول",
+            assigned_to_email: assignedEmail,
             status: (t.status || "Pending") as TaskStatus,
             deadline: t.deadline || "",
             delivery_notes: t.delivery_notes,
@@ -696,7 +702,11 @@ export default function App() {
       // id has to include the assignee — otherwise two employees sharing a task id would
       // collide in the list.
       if (user && user.role === "employee") {
-        mappedTasks.filter(t => t.assigned_to_id === user.id).forEach(t => {
+        const myEmail = (user.email || "").toLowerCase().trim();
+        mappedTasks.filter(t =>
+          t.assigned_to_id === user.id ||
+          (!!t.assigned_to_email && t.assigned_to_email === myEmail)
+        ).forEach(t => {
           const isDelivered = t.status === "Completed";
           activeNotifications.push({
             id: `task_${t.id}_${user.id}`,
@@ -2719,13 +2729,30 @@ export default function App() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      const { error } = await supabase.from("tasks").insert({
+      // Resolve the assignee up front so the task can be re-found by email later, no matter
+      // which id form ends up stored in Supabase.
+      const assignedEmployee = employees.find(e => e.id === newTask.assigned_to_id);
+      const assignedEmail = (assignedEmployee?.email || "").toLowerCase().trim();
+
+
+      const taskRow: Record<string, any> = {
         project_id: newTask.project_id,
         title: newTask.title,
         assigned_to_id: newTask.assigned_to_id,
+        assigned_email: assignedEmail || null,
         status: "Pending",
         deadline: newTask.deadline,
-      });
+      };
+
+      let { error } = await supabase.from("tasks").insert(taskRow);
+
+      // If the assigned_email column has not been migrated in yet, retry without it so
+      // assigning a task never depends on having run the migration.
+      if (error && /assigned_email/.test(error.message || "")) {
+        console.warn("tasks.assigned_email column missing; retrying without it.", error.message);
+        delete taskRow.assigned_email;
+        ({ error } = await supabase.from("tasks").insert(taskRow));
+      }
 
       if (error) {
         if (user && user.role === "admin") {
@@ -2740,13 +2767,16 @@ export default function App() {
             title: newTask.title,
             assigned_to_id: newTask.assigned_to_id,
             assigned_to_name: linkedEmployee ? (linkedEmployee.fullName || linkedEmployee.email.split("@")[0]) : "موظف مجهول",
+            assigned_to_email: assignedEmail,
             status: "Pending" as TaskStatus,
             deadline: newTask.deadline,
             created_at: new Date().toISOString()
           };
           const existing = JSON.parse(localStorage.getItem("local_tasks_bypass") || "[]");
           localStorage.setItem("local_tasks_bypass", JSON.stringify([newLocalTask, ...existing]));
-          showToast("تم تكليف الموظف بالمهمة الفنية بنجاح (تخطي أمني معتمد لأدمن النظام) ✔️", "success");
+          // This fallback only lives in THIS browser, so the employee's own device will not
+          // see the task. Say so plainly instead of reporting a normal success.
+          showToast("تم حفظ المهمة محلياً فقط، ولم تصل للخادم — الموظف لن يراها على جهازه. السبب: " + (error.message || "خطأ في الخادم"), "error");
         } else {
           throw error;
         }
@@ -3437,8 +3467,18 @@ export default function App() {
   // Determine current active content view
   const isAdmin = normalizeUserRole(user.role) === "admin";
 
+  // Single source of truth for "is this task assigned to the signed-in user?".
+  // Matching on id alone silently hid every task whose stored assignee id differs from the
+  // id the employee signed in with (e.g. a task assigned to a Supabase UUID while the
+  // employee authenticated with a local profile id). Email is the stable identifier, so a
+  // task counts as mine when either the id or the email matches.
+  const myEmailNormalized = (user.email || "").toLowerCase().trim();
+  const isTaskMine = (t: Task) =>
+    t.assigned_to_id === user.id ||
+    (!!t.assigned_to_email && t.assigned_to_email === myEmailNormalized);
+
   // Filter tasks for employee and project-specific tasks
-  const myAssignedTasks = tasks.filter(t => t.assigned_to_id === user.id);
+  const myAssignedTasks = tasks.filter(isTaskMine);
   const myCompletedTasks = myAssignedTasks.filter(t => t.status === "Completed");
   const myPendingTasks = myAssignedTasks.filter(t => t.status === "Pending" || t.status === "In Progress" || t.status === "Review");
   const myCanceledTasks = myAssignedTasks.filter(t => t.status === "Canceled");
@@ -5093,7 +5133,7 @@ export default function App() {
 
                                     <div className="flex items-center gap-2">
                                       {/* Quick Deliver button for employee or admin */}
-                                      {(isAdmin || (user.role === "employee" && tsk.assigned_to_id === user.id)) && tsk.status !== "Completed" && (
+                                      {(isAdmin || (user.role === "employee" && isTaskMine(tsk))) && tsk.status !== "Completed" && (
                                         <button
                                           type="button"
                                           onClick={() => {
@@ -5127,7 +5167,7 @@ export default function App() {
                                       </span>
 
                                       {/* Quick controls for employees & Admins */}
-                                      {(isAdmin || (user.role === "employee" && tsk.assigned_to_id === user.id)) && (
+                                      {(isAdmin || (user.role === "employee" && isTaskMine(tsk))) && (
                                         <select
                                           value={tsk.status}
                                           onChange={e => handleUpdateTaskStatus(tsk.id, e.target.value as TaskStatus)}
