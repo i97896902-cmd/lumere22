@@ -101,6 +101,20 @@ export default function App() {
   // Realtime subscription for notifications
   const [notificationChannel, setNotificationChannel] = useState<RealtimeChannel | null>(null);
 
+  // Runtime data-source diagnosis (Phase-1 table, rendered in the assignment form
+  // when prerequisites are missing; read-only, never mutates data).
+  const [syncDiagnosis, setSyncDiagnosis] = useState<{
+    hasSession: boolean;
+    authUidShort: string;
+    supabaseHost: string;
+    profilesCount: number;
+    profilesError: string;
+    projectsCount: number;
+    projectsError: string;
+    tasksCount: number;
+    tasksError: string;
+  } | null>(null);
+
   // Search/Filter states
   const [clientSearch, setClientSearch] = useState("");
   const [projectSearch, setProjectSearch] = useState("");
@@ -414,13 +428,22 @@ export default function App() {
 
       // 1. Fetch profiles
       let profilesData: any[] = [];
+      let profilesErrorMsg = "";
+      let diagSession = false;
+      let diagAuthUid = "";
+      try {
+        const { data: { session: diagS } } = await supabase.auth.getSession();
+        diagSession = !!diagS;
+        diagAuthUid = diagS?.user?.id || "";
+      } catch { /* session check is best-effort */ }
       try {
         const { data, error: profilesError } = await supabase
           .from("profiles")
           .select("*");
         if (profilesError) throw profilesError;
         profilesData = data || [];
-      } catch (err) {
+      } catch (err: any) {
+        profilesErrorMsg = err?.message || String(err);
         console.error("Profiles fetch failed:", err);
       }
 
@@ -562,6 +585,7 @@ export default function App() {
 
       // 3. Fetch projects
       let projectsData: any[] = [];
+      let projectsErrorMsg = "";
       try {
         const { data, error: projectsError } = await supabase
           .from("projects")
@@ -569,7 +593,8 @@ export default function App() {
           .order("created_at", { ascending: false });
         if (projectsError) throw projectsError;
         projectsData = data || [];
-      } catch (err) {
+      } catch (err: any) {
+        projectsErrorMsg = err?.message || String(err);
         console.error("Projects fetch failed:", err);
       }
 
@@ -595,6 +620,7 @@ export default function App() {
 
       // 4. Fetch tasks
       let tasksData: any[] = [];
+      let tasksErrorMsg = "";
       try {
         const { data, error: tasksError } = await supabase
           .from("tasks")
@@ -602,7 +628,8 @@ export default function App() {
           .order("created_at", { ascending: false });
         if (tasksError) throw tasksError;
         tasksData = data || [];
-      } catch (err) {
+      } catch (err: any) {
+        tasksErrorMsg = err?.message || String(err);
         console.error("Tasks fetch failed:", err);
       }
       // TEMP-DEBUG (assignment flow): tasks returned from Supabase.
@@ -734,10 +761,31 @@ export default function App() {
       }
       setEquipment(equipmentData);
 
-      // 7. Fetch notifications from database (replaces client-side generation)
-      // Notifications are now created via database trigger when tasks are assigned/updated
+      // 7. Fetch notifications from database (replaces client-side generation).
+      // Realtime is the primary channel (instant); the 30s poll ALSO merges
+      // notifications as a fallback in case the table publication/trigger is missing.
+      // fetchNotifications(false) only merges new rows — never deletes local state.
+      await fetchNotifications(!isPoll);
+
+      // Phase-1 diagnosis snapshot (read-only): per-source counts + first errors.
       if (!isPoll) {
-        await fetchNotifications(true);
+        let host = "";
+        try {
+          host = new URL((supabase as any).supabaseUrl || "").host;
+        } catch { /* best-effort */ }
+        const snap = {
+          hasSession: diagSession,
+          authUidShort: diagAuthUid ? diagAuthUid.slice(0, 8) + "…" : "—",
+          supabaseHost: host || "—",
+          profilesCount: profilesData.length,
+          profilesError: profilesErrorMsg,
+          projectsCount: projectsData.length,
+          projectsError: projectsErrorMsg,
+          tasksCount: tasksData.length,
+          tasksError: tasksErrorMsg,
+        };
+        setSyncDiagnosis(snap);
+        console.debug("[ASSIGN-DEBUG] sync diagnosis:", snap);
       }
 
     } catch (err: any) {
@@ -5040,6 +5088,33 @@ export default function App() {
                       </button>
                     </div>
                   </form>
+                  {/* Runtime data-source diagnosis (Phase 1 table, live values). Shown only
+                      when real prerequisites are missing so the cause is explicit. */}
+                  {(projects.filter(p => isValidUUID(p.id)).length === 0 || employees.filter(e => isValidUUID(e.id)).length === 0) && syncDiagnosis && (
+                    <div className="mt-4 p-3 bg-neutral-950 border border-amber-900/40 rounded-xl text-right" dir="rtl">
+                      <div className="text-[11px] font-bold text-amber-300 mb-2">تشخيص مصدر البيانات (قيم حية من الجلسة الحالية):</div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px] font-mono" dir="ltr">
+                        <div className="bg-neutral-900 rounded-lg p-2"><div className="text-neutral-500">session</div><div className="text-white">{syncDiagnosis.hasSession ? "yes" : "NO"}</div></div>
+                        <div className="bg-neutral-900 rounded-lg p-2"><div className="text-neutral-500">authUid</div><div className="text-white">{syncDiagnosis.authUidShort}</div></div>
+                        <div className="bg-neutral-900 rounded-lg p-2"><div className="text-neutral-500">host</div><div className="text-white">{syncDiagnosis.supabaseHost}</div></div>
+                        <div className="bg-neutral-900 rounded-lg p-2"><div className="text-neutral-500">profiles</div><div className="text-white">{syncDiagnosis.profilesCount}{syncDiagnosis.profilesError ? " ⚠" : ""}</div></div>
+                        <div className="bg-neutral-900 rounded-lg p-2"><div className="text-neutral-500">projects</div><div className="text-white">{syncDiagnosis.projectsCount}{syncDiagnosis.projectsError ? " ⚠" : ""}</div></div>
+                        <div className="bg-neutral-900 rounded-lg p-2"><div className="text-neutral-500">tasks</div><div className="text-white">{syncDiagnosis.tasksCount}{syncDiagnosis.tasksError ? " ⚠" : ""}</div></div>
+                      </div>
+                      {(syncDiagnosis.profilesError || syncDiagnosis.projectsError || syncDiagnosis.tasksError) && (
+                        <div className="text-[10px] text-rose-400 mt-2 font-mono" dir="ltr">
+                          {[syncDiagnosis.profilesError && `profiles: ${syncDiagnosis.profilesError}`, syncDiagnosis.projectsError && `projects: ${syncDiagnosis.projectsError}`, syncDiagnosis.tasksError && `tasks: ${syncDiagnosis.tasksError}`].filter(Boolean).join(" | ")}
+                        </div>
+                      )}
+                      <div className="text-[10px] text-neutral-400 mt-2">
+                        {!syncDiagnosis.hasSession
+                          ? "لا توجد جلسة Supabase — سجل الدخول بحساب الأدمن عبر Supabase Auth (وضع الطوارئ المحلي لا يرى بيانات الخادم)."
+                          : syncDiagnosis.profilesCount === 0
+                            ? "الجلسة موجودة لكن profiles فارغة — تحقق من RLS وrole حسابك في قاعدة البيانات."
+                            : "أنشئ البيانات الحقيقية بالترتيب: موظف (زر إضافة موظف) ← عميل حقيقي ← مشروع حقيقي ← مهمة."}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
