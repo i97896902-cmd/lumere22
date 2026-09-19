@@ -278,6 +278,23 @@ export default function App() {
     return msg;
   };
 
+  // Reads a JSON value from localStorage without ever throwing. A single corrupted entry
+  // used to break the whole 8-second polling cycle, leaving every screen empty until a
+  // manual reload. Falls back to the supplied default when the value is missing or invalid.
+  const readLocalJson = <T,>(key: string, fallback: T): T => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      const parsed = JSON.parse(raw);
+      if (parsed === null || typeof parsed !== "object") return fallback;
+      return parsed as T;
+    } catch {
+      console.warn(`Ignoring corrupted localStorage entry: ${key}`);
+      localStorage.removeItem(key);
+      return fallback;
+    }
+  };
+
   // Fetch all relevant data based on user role
   const loadAllData = async (isPoll: boolean = false) => {
     if (!user) return;
@@ -342,7 +359,7 @@ export default function App() {
       }
 
       // Fetch from local_profiles_bypass
-      const localProfiles = JSON.parse(localStorage.getItem("local_profiles_bypass") || "[]");
+      const localProfiles = readLocalJson<any[]>("local_profiles_bypass", []);
 
       // Merge profiles safely (avoiding duplicates based on id)
       const mergedProfilesMap = new Map();
@@ -374,8 +391,8 @@ export default function App() {
         const userRole: UserRole = normalizeUserRole(p.role);
         const rawStatus = String(p.status || "").toLowerCase().trim();
         const userStatus: UserStatus = (isThisUserAdmin || rawStatus === "approved" || rawStatus === "active") ? "Approved" : "Pending Approval";
-        const userSpecialization: Specialization = isThisUserAdmin 
-          ? "مدير" 
+        const userSpecialization: Specialization = isThisUserAdmin
+          ? "مدير"
           : (p.specialization as Specialization || "يتدرب");
 
         return {
@@ -420,9 +437,9 @@ export default function App() {
         console.error("Clients fetch failed:", err);
       }
 
-      const localClients = JSON.parse(localStorage.getItem("local_clients_bypass") || "[]");
-      const localCreds = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
-      
+      const localClients = readLocalJson<any[]>("local_clients_bypass", []);
+      const localCreds = readLocalJson<Record<string, any>>("local_profiles_credentials", {});
+
       const allClientsCombined = [
         ...localClients,
         ...clientsData.map(client => {
@@ -474,7 +491,7 @@ export default function App() {
         console.error("Projects fetch failed:", err);
       }
 
-      const localProjects = JSON.parse(localStorage.getItem("local_projects_bypass") || "[]");
+      const localProjects = readLocalJson<any[]>("local_projects_bypass", []);
       const mappedProjects = [
         ...localProjects,
         ...projectsData.map(p => {
@@ -507,7 +524,7 @@ export default function App() {
         console.error("Tasks fetch failed:", err);
       }
 
-      const localTasks = JSON.parse(localStorage.getItem("local_tasks_bypass") || "[]");
+      const localTasks = readLocalJson<any[]>("local_tasks_bypass", []);
       const mappedTasks = [
         ...localTasks,
         ...tasksData.map(t => {
@@ -542,7 +559,7 @@ export default function App() {
         console.error("Transactions fetch failed:", err);
       }
 
-      const localTransactions = JSON.parse(localStorage.getItem("local_transactions_bypass") || "[]");
+      const localTransactions = readLocalJson<any[]>("local_transactions_bypass", []);
       const mappedTransactions = [
         ...localTransactions,
         ...financesData.map(tx => {
@@ -586,7 +603,7 @@ export default function App() {
         console.error("Payroll fetch failed:", err);
       }
 
-      const localPayroll = JSON.parse(localStorage.getItem("local_payroll_bypass") || "[]");
+      const localPayroll = readLocalJson<any[]>("local_payroll_bypass", []);
       const mappedPayroll = [
         ...localPayroll,
         ...payrollData.map(p => {
@@ -985,27 +1002,30 @@ export default function App() {
 
   // Pre-seed known users into local bypass in case of confirmation issues
   useEffect(() => {
-    const localCredentials = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
+    const localCredentials = readLocalJson<Record<string, any>>("local_profiles_credentials", {});
     Object.entries(localCredentials).forEach(([email, record]: [string, any]) => {
       if (record?.profile?.role === "employee") delete localCredentials[email];
     });
     localStorage.setItem("local_profiles_credentials", JSON.stringify(localCredentials));
 
-    const seedLocalUser = (email: string, pass: string | null, profileData: any) => {
+    // The login handler refuses the local-credential bypass for employees (they must
+    // authenticate through Supabase Auth), so an employee password is never stored — it
+    // would only sit exposed in localStorage without ever being read. Client accounts do
+    // use the local bypass, so their password is kept.
+    const seedLocalUser = (email: string, profileData: any, password?: string) => {
       const cleanEmail = email.trim().toLowerCase();
       if (wasLocalRecordDeleted(profileData.id)) return;
-      
-      // Employee passwords must remain in Supabase Auth, never in browser storage.
-      const localCredentials = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
+
+      const localCredentials = readLocalJson<Record<string, any>>("local_profiles_credentials", {});
       if (profileData.role === "employee") {
         delete localCredentials[cleanEmail];
-      } else if (pass) {
-        localCredentials[cleanEmail] = { password: pass, profile: profileData };
+      } else if (password) {
+        localCredentials[cleanEmail] = { password, profile: profileData };
       }
       localStorage.setItem("local_profiles_credentials", JSON.stringify(localCredentials));
 
       // Update local_profiles_bypass
-      const localProfiles = JSON.parse(localStorage.getItem("local_profiles_bypass") || "[]");
+      const localProfiles = readLocalJson<any[]>("local_profiles_bypass", []);
       const index = localProfiles.findIndex((p: any) => p.email && p.email.trim().toLowerCase() === cleanEmail);
       if (index !== -1) {
         localProfiles[index] = { ...localProfiles[index], ...profileData };
@@ -1018,7 +1038,6 @@ export default function App() {
     // Seed the requested employee ibrahim mohamed
     seedLocalUser(
       "i97896902@gmail.com",
-      "ibrahim12",
       {
         id: "ibrahim-mohamed-id-97896902",
         email: "i97896902@gmail.com",
@@ -1036,7 +1055,6 @@ export default function App() {
     // Seed the requested employee mohamed (مصور)
     seedLocalUser(
       "mohamed@lumere.gmail.com",
-      "mohamed2233",
       {
         id: "mohamed-user-id",
         email: "mohamed@lumere.gmail.com",
@@ -1054,7 +1072,6 @@ export default function App() {
     // Seed the requested employee ghareb (مونتير)
     seedLocalUser(
       "ghareb@lumere.com",
-      "ghareb123",
       {
         id: "ghareb-user-id",
         email: "ghareb@lumere.com",
@@ -1074,7 +1091,6 @@ export default function App() {
     const demoClientId = "clt_demo_alfares";
     seedLocalUser(
       demoClientEmail,
-      "client123",
       {
         id: "user_" + demoClientId,
         email: demoClientEmail,
@@ -1087,10 +1103,11 @@ export default function App() {
         contract_status: "ساري",
         client_id: demoClientId,
         created_at: new Date().toISOString()
-      }
+      },
+      "client123"
     );
 
-    const localClients = JSON.parse(localStorage.getItem("local_clients_bypass") || "[]");
+    const localClients = readLocalJson<any[]>("local_clients_bypass", []);
     if (!wasLocalRecordDeleted(demoClientId) && !localClients.some((c: any) => c.id === demoClientId || c.email === demoClientEmail)) {
       localClients.unshift({
         id: demoClientId,
@@ -1107,7 +1124,7 @@ export default function App() {
       localStorage.setItem("local_clients_bypass", JSON.stringify(localClients));
     }
 
-    const localProjects = JSON.parse(localStorage.getItem("local_projects_bypass") || "[]");
+    const localProjects = readLocalJson<any[]>("local_projects_bypass", []);
     const demoProjId = "proj_demo_alfares_1";
     if (!wasLocalRecordDeleted(demoProjId) && !localProjects.some((p: any) => p.id === demoProjId)) {
       localProjects.unshift({
@@ -1124,7 +1141,7 @@ export default function App() {
       localStorage.setItem("local_projects_bypass", JSON.stringify(localProjects));
     }
 
-    const localTasks = JSON.parse(localStorage.getItem("local_tasks_bypass") || "[]");
+    const localTasks = readLocalJson<any[]>("local_tasks_bypass", []);
     // Seed the demo tasks only once. Otherwise, deleting every demo task would
     // cause all of them to be recreated after the next app reload.
     const demoTasksInitialized = localStorage.getItem("lumere_demo_tasks_initialized") === "true";
@@ -1194,7 +1211,7 @@ export default function App() {
     setAuthLoading(true);
 
     const cleanEmail = email.trim();
-    
+
     // Email Validation Check
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(cleanEmail)) {
@@ -1375,23 +1392,23 @@ export default function App() {
 
         // Check local credentials bypass as a high-fidelity fallback if standard login failed
         if (signInError) {
-          const localCreds = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
+          const localCreds = readLocalJson<Record<string, any>>("local_profiles_credentials", {});
           const targetEmail = cleanEmail.toLowerCase();
           const savedRecord = localCreds[targetEmail];
 
           if (savedRecord && savedRecord.profile?.role !== "employee" && savedRecord.password === password) {
             console.warn("Detected match in local credentials, bypassing online authentication.");
-            
+
             // Fetch updated profile state from local_profiles_bypass if available (so status updates take effect)
-            const localProfilesList = JSON.parse(localStorage.getItem("local_profiles_bypass") || "[]");
+            const localProfilesList = readLocalJson<any[]>("local_profiles_bypass", []);
             const updatedProfile = localProfilesList.find((p: any) => p.email && p.email.toLowerCase().trim() === targetEmail);
-            
+
             const finalProfile = updatedProfile || savedRecord.profile;
-            
+
             // Check if status is approved or active
             const statusStr = String(finalProfile.status || "pending").toLowerCase().trim();
             const isApproved = statusStr === "approved" || statusStr === "active" || finalProfile.role === "admin";
-            
+
             if (!isApproved) {
               setAuthLoading(false);
               setAuthError("حسابك قيد المراجعة والقبول من قِبل الإدارة. يرجى الانتظار");
@@ -1602,7 +1619,7 @@ export default function App() {
       await supabase.auth.resetPasswordForEmail(forgotEmail.trim(), {
         redirectTo: `${window.location.origin}/?token=supabase-auth-token-simulated`,
       });
-      
+
       const simulatedToken = "token_" + Math.random().toString(36).substring(2, 11);
       const simulatedLink = `${window.location.origin}/?token=${simulatedToken}`;
 
@@ -1652,7 +1669,7 @@ export default function App() {
       setSimulatedResetLink(null);
     } catch (err: any) {
       const friendlyErr = getFriendlyErrorMessage(err);
-      
+
       // If session is missing, but they are in a simulated development/preview flow, let's handle it gracefully so it doesn't crash or get stuck
       if (err.message?.includes("session missing") || err.message?.includes("Auth session missing") || err.message?.includes("unauthenticated")) {
         showToast("تحديث كلمة المرور: تم تحديث كلمة المرور بنجاح للمحاكاة وتجاوز حماية الجلسة الرقمية في البيئة التجريبية!", "success");
@@ -1723,21 +1740,21 @@ export default function App() {
     try {
       const dbSpec = spec;
       let finalStatusValue = "active";
-      
+
       // Update status directly in Supabase (with fallback to 'approved' if constraint rejects 'active')
       try {
         const { error } = await supabase
           .from("profiles")
           .update({ status: "active", specialization: dbSpec })
           .eq("id", userId);
-        
+
         if (error) {
           console.warn("Database status 'active' update failed, attempting fallback to 'approved':", error);
           const { error: fallbackError } = await supabase
             .from("profiles")
             .update({ status: "approved", specialization: dbSpec })
             .eq("id", userId);
-          
+
           if (fallbackError) throw fallbackError;
           finalStatusValue = "approved";
         }
@@ -1785,10 +1802,10 @@ export default function App() {
       }
 
       // Delete from local storage backup
-      const localProfiles = JSON.parse(localStorage.getItem("local_profiles_bypass") || "[]");
+      const localProfiles = readLocalJson<any[]>("local_profiles_bypass", []);
       const updatedLocalProfiles = localProfiles.filter((p: any) => p.id !== userId);
       localStorage.setItem("local_profiles_bypass", JSON.stringify(updatedLocalProfiles));
-      const localCredentials = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
+      const localCredentials = readLocalJson<Record<string, any>>("local_profiles_credentials", {});
       Object.entries(localCredentials).forEach(([email, record]: [string, any]) => {
         if (record?.profile?.id === userId) delete localCredentials[email];
       });
@@ -1818,10 +1835,10 @@ export default function App() {
         }
 
         // Delete from local storage backup
-        const localProfiles = JSON.parse(localStorage.getItem("local_profiles_bypass") || "[]");
+        const localProfiles = readLocalJson<any[]>("local_profiles_bypass", []);
         const updatedLocalProfiles = localProfiles.filter((p: any) => p.id !== employeeId);
         localStorage.setItem("local_profiles_bypass", JSON.stringify(updatedLocalProfiles));
-        const localCredentials = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
+        const localCredentials = readLocalJson<Record<string, any>>("local_profiles_credentials", {});
         Object.entries(localCredentials).forEach(([email, record]: [string, any]) => {
           if (record?.profile?.id === employeeId) delete localCredentials[email];
         });
@@ -2219,7 +2236,7 @@ export default function App() {
       is_local_bypass: true
     };
 
-    const localCredentials = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
+    const localCredentials = readLocalJson<Record<string, any>>("local_profiles_credentials", {});
     localCredentials[cleanEmail] = {
       password: portalPassword,
       profile: clientProfileData
@@ -2262,7 +2279,7 @@ export default function App() {
   // Test login directly as client
   const handleTestLoginAsClient = (targetClient: ClientProfile) => {
     const cleanEmail = targetClient.email.trim().toLowerCase();
-    const localCreds = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
+    const localCreds = readLocalJson<Record<string, any>>("local_profiles_credentials", {});
     const saved = localCreds[cleanEmail]?.profile;
 
     const clientUser: UserProfile = {
@@ -2329,7 +2346,7 @@ export default function App() {
 
         // 4. Remove credentials from local_profiles_credentials
         if (cleanEmail) {
-          const localCreds = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
+          const localCreds = readLocalJson<Record<string, any>>("local_profiles_credentials", {});
           if (localCreds[cleanEmail]) {
             delete localCreds[cleanEmail];
             localStorage.setItem("local_profiles_credentials", JSON.stringify(localCreds));
@@ -2338,9 +2355,9 @@ export default function App() {
 
         // 5. Remove profile from local_profiles_bypass
         const localProfiles = JSON.parse(localStorage.getItem("local_profiles_bypass") || "[]");
-        const filteredProfiles = localProfiles.filter((p: any) => 
-          p.id !== targetClient.id && 
-          p.client_id !== targetClient.id && 
+        const filteredProfiles = localProfiles.filter((p: any) =>
+          p.id !== targetClient.id &&
+          p.client_id !== targetClient.id &&
           (!cleanEmail || p.email?.toLowerCase().trim() !== cleanEmail)
         );
         localStorage.setItem("local_profiles_bypass", JSON.stringify(filteredProfiles));
@@ -2389,7 +2406,7 @@ export default function App() {
 
         // 2. Remove credentials from local_profiles_credentials
         if (cleanEmail) {
-          const localCreds = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
+          const localCreds = readLocalJson<Record<string, any>>("local_profiles_credentials", {});
           if (localCreds[cleanEmail]) {
             delete localCreds[cleanEmail];
             localStorage.setItem("local_profiles_credentials", JSON.stringify(localCreds));
@@ -2398,7 +2415,7 @@ export default function App() {
 
         // 3. Remove client profile from local_profiles_bypass
         const localProfiles = JSON.parse(localStorage.getItem("local_profiles_bypass") || "[]");
-        const filteredProfiles = localProfiles.filter((p: any) => 
+        const filteredProfiles = localProfiles.filter((p: any) =>
           !(p.role === "client" && (p.client_id === targetClient.id || (cleanEmail && p.email?.toLowerCase().trim() === cleanEmail)))
         );
         localStorage.setItem("local_profiles_bypass", JSON.stringify(filteredProfiles));
@@ -2550,7 +2567,7 @@ export default function App() {
           localStorage.setItem("local_clients_bypass", "[]");
 
           // 4. Clean local_profiles_credentials (remove all client credentials)
-          const localCreds = JSON.parse(localStorage.getItem("local_profiles_credentials") || "{}");
+          const localCreds = readLocalJson<Record<string, any>>("local_profiles_credentials", {});
           const cleanedCreds: Record<string, any> = {};
           Object.entries(localCreds).forEach(([emailKey, credVal]: [string, any]) => {
             if (credVal?.profile?.role !== "client") {
