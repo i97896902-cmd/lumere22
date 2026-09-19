@@ -474,6 +474,14 @@ export default function App() {
       setEmployees(approvedUsers);
       setPendingUsers(pendingUsers);
 
+      // Diagnostic (no data change): if an admin session gets ZERO profiles from the
+      // server, RLS hid them (e.g. Supabase session missing/not-admin). The employees
+      // still exist in the database — only the query/role is wrong. Guide, don't delete.
+      if (!isPoll && normalizeUserRole(user.role) === "admin" && profilesData.length === 0) {
+        console.warn("Profiles query returned 0 rows for an admin session — employees exist in DB but RLS/session hides them. Re-login via Supabase Auth with an admin profile.");
+        showToast("تعذر جلب الموظفين من الخادم (الجلسة غير مصرحة). الموظفون موجودون — أعد تسجيل الدخول بحساب أدمن Supabase.", "error");
+      }
+
       // 2. Fetch clients
       let clientsData: any[] = [];
       try {
@@ -1052,30 +1060,12 @@ export default function App() {
       localStorage.setItem("local_profiles_bypass", JSON.stringify(localProfiles));
     };
 
-    // ROOT FIX: fake employee IDs ("mohamed-user-id", "ibrahim-mohamed-id-97896902",
-    // "ghareb-user-id") were previously seeded here with non-UUID strings. When the admin
-    // picked one of them in the task form, that string was sent to the UUID-typed
-    // tasks.assigned_to_id column → "invalid input syntax for type uuid".
-    // Employees MUST come from Supabase Auth + profiles (real UUID = auth.users.id).
-    // Real employees are created via "إضافة موظف" which calls Supabase Auth signUp.
-    // So: never seed fake employees, and purge any fake entries left in old browsers.
-    const FAKE_EMPLOYEE_IDS = new Set([
-      "ibrahim-mohamed-id-97896902",
-      "mohamed-user-id",
-      "ghareb-user-id",
-    ]);
-    try {
-      const existingProfiles = readLocalJson<any[]>("local_profiles_bypass", []);
-      const cleaned = existingProfiles.filter((p: any) => !FAKE_EMPLOYEE_IDS.has(p?.id));
-      if (cleaned.length !== existingProfiles.length) {
-        localStorage.setItem("local_profiles_bypass", JSON.stringify(cleaned));
-      }
-      const existingTasks = readLocalJson<any[]>("local_tasks_bypass", []);
-      // Demo tasks that point at fake employees stay local-only and are never sent to
-      // Supabase (UUID validation blocks them). Keep them for local demo display only.
-    } catch {
-      // Ignore cleanup failures; validation below is the real guard.
-    }
+    // AUDIT NOTE (non-destructive rule): never auto-delete employee records.
+    // Legacy browsers may hold local demo profiles with non-UUID ids. They are kept
+    // untouched for display; UUID validation at INSERT time is the guard that stops
+    // fake IDs from ever reaching UUID-typed columns. Real employees always come
+    // from Supabase Auth + profiles (real UUID = auth.users.id, created via "إضافة موظف").
+    // Non-UUID options are shown DISABLED in assignment dropdowns (visible, not selectable).
 
     // Seed default demo client with project & tasks to verify client portal and completion percentage
     const demoClientEmail = "client@lumere.com";
@@ -2670,56 +2660,79 @@ export default function App() {
     }
   };
 
-  // Add Project
+  // Add Project — projects.client_id is UUID REFERENCES clients(id).
+  // Never send local/demo client IDs to it; never report a local-only save as success.
   const handleAddProject = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
+      const rawClientId = (newProject.client_id || "").trim();
+      const title = (newProject.title || "").trim();
+      if (!isValidUUID(rawClientId)) {
+        showToast("معرف العميل غير صالح (سجل عرض محلي مرفوض). اختر عميلاً حقيقياً من قاعدة البيانات.", "error");
+        return;
+      }
+      if (!title) {
+        showToast("عنوان المشروع مطلوب", "error");
+        return;
+      }
+      const linkedClient = clients.find(c => c.id === rawClientId);
+      if (!linkedClient || !isValidUUID(linkedClient.id)) {
+        showToast("العميل المختار ليس سجلاً حقيقياً في قاعدة البيانات.", "error");
+        return;
+      }
+
       const { error } = await supabase.from("projects").insert({
-        client_id: newProject.client_id,
-        title: newProject.title,
+        client_id: rawClientId,
+        title,
         budget: Number(newProject.budget),
         type: newProject.track_type,
         status: "قيد التنفيذ",
-        deadline: newProject.deadline,
+        deadline: newProject.deadline || null,
       });
+      if (error) throw error;
 
-      if (error) {
-        if (user && user.role === "admin") {
-          console.warn("Supabase insertion failed. Initiating Super Admin Bypass logic:", error);
-          const localId = "local_prj_" + Math.random().toString(36).substring(2, 9);
-          const linkedClient = clients.find(c => c.id === newProject.client_id);
-          const newLocalProject = {
-            id: localId,
-            client_id: newProject.client_id,
-            client_name: linkedClient ? linkedClient.name : "عميل مجهول",
-            title: newProject.title,
-            track_type: newProject.track_type,
-            budget: Number(newProject.budget || 0),
-            deadline: newProject.deadline,
-            requirements: "",
-            created_at: new Date().toISOString()
-          };
-          const existing = JSON.parse(localStorage.getItem("local_projects_bypass") || "[]");
-          localStorage.setItem("local_projects_bypass", JSON.stringify([newLocalProject, ...existing]));
-          showToast("تم إضافة المشروع الجديد بنجاح (تخطي أمني معتمد لأدمن النظام) ✔️", "success");
-        } else {
-          throw error;
-        }
-      } else {
-        showToast("تم إضافة المشروع الجديد بنجاح", "success");
-      }
-
+      showToast("تم إضافة المشروع الجديد بنجاح", "success");
       setShowAddProject(false);
       setNewProject({
         client_id: "", title: "", track_type: "تصوير", budget: "", deadline: "", requirements: "", drive_url: ""
       });
       loadAllData();
     } catch (err: any) {
+      console.error("Project INSERT failed:", err);
       showToast(err.message || "حدث خطأ في الاتصال", "error");
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // Delete Project (Admin only) — deletes ONLY the project row via the admin RPC.
+  // FK design (schema-intended): tasks + notifications of this project cascade;
+  // profiles/employees are NEVER touched (tasks.assigned_to_id is ON DELETE SET NULL,
+  // and no FK points from employees to projects). Local demo projects are removed
+  // from browser storage only.
+  const handleDeleteProject = async (projectId: string) => {
+    const proj = projects.find(p => p.id === projectId);
+    showConfirm(`هل تريد حذف المشروع (${proj?.title || projectId}) نهائياً؟ سيتم حذف مهامه وإشعاراته المرتبطة (سلوك مقصود في الـ schema)، ولن يتم حذف أي موظف أو حساب.`, async () => {
+      try {
+        if (!projectId || !isValidUUID(projectId)) {
+          // Local demo project: exists in this browser only.
+          const localProjects = readLocalJson<any[]>("local_projects_bypass", []);
+          localStorage.setItem("local_projects_bypass", JSON.stringify(localProjects.filter((p: any) => p.id !== projectId)));
+          rememberDeletedLocalRecords(projectId);
+          setProjects(prev => prev.filter(p => p.id !== projectId));
+          showToast("تم حذف المشروع المحلي بنجاح", "success");
+          return;
+        }
+        await deleteAdminRecord("projects", projectId);
+        setProjects(prev => prev.filter(p => p.id !== projectId));
+        setTasks(prev => prev.filter(t => t.project_id !== projectId));
+        showToast("تم حذف المشروع ومهامه المرتبطة بنجاح (الموظفون لم يتأثروا)", "success");
+        loadAllData();
+      } catch (err: any) {
+        showToast(err.message || "حدث خطأ أثناء حذف المشروع", "error");
+      }
+    }, "حذف مشروع");
   };
 
   // Add Task — ROOT FIX: tasks.assigned_to_id is UUID REFERENCES profiles(id),
@@ -2987,47 +3000,36 @@ export default function App() {
     }, "حذف القيد المالي");
   };
 
-  // Add Payroll Record
+  // Add Payroll Record — payroll.employee_id is UUID REFERENCES profiles(id).
   const handleAddPayroll = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
+      const rawEmployeeId = (newPayroll.employee_id || "").trim();
+      if (!isValidUUID(rawEmployeeId)) {
+        showToast("معرف الموظف غير صالح (قيمة وهمية مرفوضة). اختر موظفاً حقيقياً له حساب Supabase Auth.", "error");
+        return;
+      }
+      const linkedEmployee = employees.find(emp => emp.id === rawEmployeeId);
+      if (!linkedEmployee || !isValidUUID(linkedEmployee.id)) {
+        showToast("الموظف المختار ليس سجلاً حقيقياً في قاعدة البيانات.", "error");
+        return;
+      }
+
       const { error } = await supabase.from("payroll").insert({
-        employee_id: newPayroll.employee_id,
+        employee_id: rawEmployeeId,
         amount: Number(newPayroll.amount),
         month: newPayroll.month,
         status: "معلق",
       });
+      if (error) throw error;
 
-      if (error) {
-        if (user && user.role === "admin") {
-          console.warn("Supabase insertion failed. Initiating Super Admin Bypass logic:", error);
-          const localId = "local_pay_" + Math.random().toString(36).substring(2, 9);
-          const linkedEmployee = employees.find(e => e.id === newPayroll.employee_id);
-          const newLocalPayroll = {
-            id: localId,
-            employee_id: newPayroll.employee_id,
-            employee_name: linkedEmployee ? (linkedEmployee.fullName || linkedEmployee.email.split("@")[0]) : "موظف مجهول",
-            employee_email: linkedEmployee ? linkedEmployee.email : "system",
-            amount: Number(newPayroll.amount),
-            month: newPayroll.month,
-            status: "معلق" as const,
-            created_at: new Date().toISOString()
-          };
-          const existing = JSON.parse(localStorage.getItem("local_payroll_bypass") || "[]");
-          localStorage.setItem("local_payroll_bypass", JSON.stringify([newLocalPayroll, ...existing]));
-          showToast("تم تسجيل استحقاق الراتب للموظف بنجاح (تخطي أمني معتمد لأدمن النظام) ✔️", "success");
-        } else {
-          throw error;
-        }
-      } else {
-        showToast("تم تسجيل استحقاق الراتب للموظف بنجاح", "success");
-      }
-
+      showToast("تم تسجيل استحقاق الراتب للموظف بنجاح", "success");
       setShowAddPayroll(false);
       setNewPayroll({ employee_id: "", amount: "", month: "" });
       loadAllData();
     } catch (err: any) {
+      console.error("Payroll INSERT failed:", err);
       showToast(err.message || "حدث خطأ في الاتصال", "error");
     } finally {
       setSubmitting(false);
@@ -3488,6 +3490,21 @@ export default function App() {
   // employee's id is profiles.id = auth.users.id (UUID). Match on UUID only — never on
   // name/email. RLS on the server enforces the same rule (assigned_to_id = auth.uid()).
   const isTaskMine = (t: Task) => t.assigned_to_id === user.id;
+
+  // Employee ↔ Project has no junction table in the schema: the link IS tasks.
+  // An employee's "assigned projects" = DISTINCT project_ids of their own tasks,
+  // derived ONLY from Supabase rows: local/demo tasks carry non-UUID ids
+  // ("task_demo_*", "local_tsk_*") while Supabase PKs are UUIDs, so localStorage
+  // can never leak into this set. ANY task status counts — a completed assignment
+  // still keeps its project visible to the employee.
+  const myProjectIds = React.useMemo(
+    () => new Set(
+      tasks
+        .filter(t => isTaskMine(t) && isValidUUID(t.id) && isValidUUID(t.project_id))
+        .map(t => t.project_id)
+    ),
+    [tasks, user.id]
+  );
 
   // Filter tasks for employee and project-specific tasks
   const myAssignedTasks = tasks.filter(isTaskMine);
@@ -4819,7 +4836,9 @@ export default function App() {
                       >
                         <option value="">-- اختر عميلاً مسجلاً --</option>
                         {clients.map(c => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
+                          isValidUUID(c.id)
+                            ? <option key={c.id} value={c.id}>{c.name}</option>
+                            : <option key={c.id} value={c.id} disabled>{c.name} — سجل عرض محلي</option>
                         ))}
                       </select>
                     </div>
@@ -4909,7 +4928,7 @@ export default function App() {
                   </div>
                   <form onSubmit={handleAddTask} className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div>
-                      <label className="block text-[11px] font-semibold text-neutral-400 mb-1">المشروع التابع له * (سجلات Supabase الحقيقية فقط)</label>
+                      <label className="block text-[11px] font-semibold text-neutral-400 mb-1">المشروع التابع له *</label>
                       <select
                         required
                         value={newTask.project_id}
@@ -4917,8 +4936,10 @@ export default function App() {
                         className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-xs text-white"
                       >
                         <option value="">-- اختر المشروع --</option>
-                        {projects.filter(p => isValidUUID(p.id)).map(p => (
-                          <option key={p.id} value={p.id}>{p.title}</option>
+                        {projects.map(p => (
+                          isValidUUID(p.id)
+                            ? <option key={p.id} value={p.id}>{p.title}</option>
+                            : <option key={p.id} value={p.id} disabled>{p.title} — سجل عرض محلي (لا يقبل مهام حقيقية)</option>
                         ))}
                       </select>
                       {projects.length > 0 && projects.filter(p => isValidUUID(p.id)).length === 0 && (
@@ -4937,7 +4958,7 @@ export default function App() {
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-neutral-400 mb-1">الموظف المسؤول عن التنفيذ * (حساب Supabase حقيقي فقط)</label>
+                      <label className="block text-[11px] font-semibold text-neutral-400 mb-1">الموظف المسؤول عن التنفيذ *</label>
                       <select
                         required
                         value={newTask.assigned_to_id}
@@ -4945,8 +4966,10 @@ export default function App() {
                         className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-xs text-white"
                       >
                         <option value="">-- اختر موظفاً معتمداً --</option>
-                        {employees.filter(emp => isValidUUID(emp.id)).map(emp => (
-                          <option key={emp.id} value={emp.id}>{emp.email} ({emp.specialization})</option>
+                        {employees.map(emp => (
+                          isValidUUID(emp.id)
+                            ? <option key={emp.id} value={emp.id}>{emp.email} ({emp.specialization})</option>
+                            : <option key={emp.id} value={emp.id} disabled>{emp.email} ({emp.specialization}) — يحتاج حساب Supabase حقيقي</option>
                         ))}
                       </select>
                       {employees.length > 0 && employees.filter(emp => isValidUUID(emp.id)).length === 0 && (
@@ -4983,6 +5006,9 @@ export default function App() {
                 <div className="space-y-4">
                 {projects
                   .filter(p => {
+                    // Employees see ONLY projects they are assigned to via tasks.
+                    // (No project_members table exists; tasks are the assignment link.)
+                    if (normalizeUserRole(user.role) === "employee" && !myProjectIds.has(p.id)) return false;
                     if (user.role === "client") {
                       const matchedClient = clients.find(c => 
                         c.email?.toLowerCase().trim() === user.email.toLowerCase().trim() ||
@@ -5087,6 +5113,15 @@ export default function App() {
                                 />
                               </div>
                             </div>
+                            {isAdmin && (
+                              <button
+                                onClick={() => handleDeleteProject(p.id)}
+                                className="p-2 bg-rose-950/20 hover:bg-rose-900 text-rose-400 hover:text-white rounded-lg border border-rose-900/10 transition cursor-pointer shrink-0"
+                                title="حذف المشروع ومهامه المرتبطة (لا يمس الموظفين)"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         </div>
 
@@ -5684,7 +5719,9 @@ export default function App() {
                       >
                         <option value="">-- اختر موظفاً معتمداً --</option>
                         {employees.map(e => (
-                          <option key={e.id} value={e.id}>{e.email} ({e.specialization})</option>
+                          isValidUUID(e.id)
+                            ? <option key={e.id} value={e.id}>{e.email} ({e.specialization})</option>
+                            : <option key={e.id} value={e.id} disabled>{e.email} ({e.specialization}) — يحتاج حساب Supabase حقيقي</option>
                         ))}
                       </select>
                     </div>
