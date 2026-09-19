@@ -109,172 +109,168 @@ const defaultEquipmentList: EquipmentItem[] = [
   }
 ];
 
+// Seed accounts that must always exist. Emails in `aliases` are treated as the same person
+// when an older database was written with a malformed or alternate address.
+interface SeedUser {
+  id: string;
+  email: string;
+  password: string;
+  role: UserProfile["role"];
+  status: UserProfile["status"];
+  fullName?: string;
+  specialization?: UserProfile["specialization"];
+  phone?: string;
+  bio?: string;
+  aliases: string[];
+}
+
+const DEFAULT_USERS: SeedUser[] = [
+  {
+    id: "admin-user-id",
+    email: "yousef555554321@gmail.com",
+    password: "146008",
+    role: "admin",
+    status: "Approved",
+    aliases: []
+  },
+  {
+    id: "ghareb-user-id",
+    email: "ghareb@lumere.com",
+    fullName: "غريب",
+    password: "ghareb123",
+    role: "employee",
+    status: "Approved",
+    specialization: "مونتير",
+    phone: "01095809078",
+    bio: "محرر ومونتير فيديو محترف - وكالة LUMÉRÉ",
+    aliases: ["ghareb.lumere.com"]
+  },
+  {
+    id: "mohamed-user-id",
+    email: "mohamed@lumere.gmail.com",
+    fullName: "محمد",
+    password: "mohamed2233",
+    role: "employee",
+    status: "Approved",
+    specialization: "مصور",
+    phone: "01032659109",
+    bio: "مصور محترف - وكالة LUMÉRÉ",
+    aliases: ["mohamed.lumere.gmail.com"]
+  }
+];
+
+// Turns a seed definition into a storable user record (aliases are lookup-only).
+function toSeedUserRecord(seed: SeedUser): UserProfile & { password?: string } {
+  const { aliases: _aliases, ...rest } = seed;
+  return { ...rest, created_at: new Date().toISOString() };
+}
+
+// A fresh, empty database containing the mandatory seed accounts.
+function seedDefaults(): DBStructure {
+  return {
+    users: DEFAULT_USERS.map(toSeedUserRecord),
+    clients: [],
+    projects: [],
+    tasks: [],
+    finances: [],
+    payroll: [],
+    notifications: [],
+    auditLogs: []
+  };
+}
+
+// Re-inserts any missing seed account and repairs the known phone number drift.
+// Returns true when the database was actually modified.
+function ensureSeedUsers(parsed: DBStructure): boolean {
+  let updated = false;
+
+  DEFAULT_USERS.forEach(seed => {
+    const acceptableEmails = [seed.email, ...seed.aliases].map(e => e.toLowerCase());
+    const existing = parsed.users.find(u => acceptableEmails.includes(u.email?.trim().toLowerCase()));
+
+    if (!existing) {
+      parsed.users.push(toSeedUserRecord(seed));
+      updated = true;
+      return;
+    }
+
+    // Phone numbers were historically out of sync; keep the seed value authoritative.
+    if (seed.phone && existing.phone !== seed.phone) {
+      existing.phone = seed.phone;
+      updated = true;
+    }
+  });
+
+  if (!parsed.equipment || parsed.equipment.length === 0) {
+    parsed.equipment = defaultEquipmentList;
+    updated = true;
+  }
+
+  return updated;
+}
+
+// Preserves an unreadable database so it can be recovered by hand, then reports success.
+function recoveryBackup(): boolean {
+  try {
+    const backupFile = `${DB_FILE}.corrupt-${Date.now()}.bak`;
+    fs.copyFileSync(DB_FILE, backupFile);
+    console.error("Corrupt database preserved at:", backupFile);
+    return true;
+  } catch (backupErr) {
+    console.error("Failed to back up corrupt database file:", backupErr);
+    return false;
+  }
+}
+
 function loadDB(): DBStructure {
   if (!fs.existsSync(DB_FILE)) {
     // Check if a seed db.json exists in process.cwd() or adjacent directory to seed from
     const localSeed = path.join(process.cwd(), "db.json");
     if (fs.existsSync(localSeed) && localSeed !== DB_FILE) {
       try {
-        const seedData = fs.readFileSync(localSeed, "utf-8");
-        const parsed = JSON.parse(seedData);
-        fs.writeFileSync(DB_FILE, JSON.stringify(parsed, null, 2));
+        const parsed = JSON.parse(fs.readFileSync(localSeed, "utf-8"));
+        saveDB(parsed);
         return parsed;
       } catch {
         // Fallback to fresh initialDB
       }
     }
 
-    const initialDB: DBStructure = {
-      users: [
-        {
-          id: "admin-user-id",
-          email: "yousef555554321@gmail.com",
-          password: "146008",
-          role: "admin",
-          status: "Approved",
-          created_at: new Date().toISOString()
-        },
-        {
-          id: "ghareb-user-id",
-          email: "ghareb@lumere.com",
-          fullName: "غريب",
-          password: "ghareb123",
-          role: "employee",
-          status: "Approved",
-          specialization: "مونتير",
-          phone: "01095809078",
-          bio: "محرر ومونتير فيديو محترف - وكالة LUMÉRÉ",
-          created_at: new Date().toISOString()
-        },
-        {
-          id: "mohamed-user-id",
-          email: "mohamed@lumere.gmail.com",
-          fullName: "محمد",
-          password: "mohamed2233",
-          role: "employee",
-          status: "Approved",
-          specialization: "مصور",
-          phone: "01032659109",
-          bio: "مصور محترف - وكالة LUMÉRÉ",
-          created_at: new Date().toISOString()
-        }
-      ],
-      clients: [],
-      projects: [],
-      tasks: [],
-      finances: [],
-      payroll: [],
-      notifications: [],
-      auditLogs: []
-    };
-    fs.writeFileSync(DB_FILE, JSON.stringify(initialDB, null, 2));
+    const initialDB = seedDefaults();
+    saveDB(initialDB);
     return initialDB;
   }
   try {
-    const data = fs.readFileSync(DB_FILE, "utf-8");
-    const parsed = JSON.parse(data);
-    let updated = false;
-
-    // Ensure admin user is always present
-    const hasAdmin = parsed.users.some((u: any) => u.email === "yousef555554321@gmail.com");
-    if (!hasAdmin) {
-      parsed.users.push({
-        id: "admin-user-id",
-        email: "yousef555554321@gmail.com",
-        password: "146008",
-        role: "admin",
-        status: "Approved",
-        created_at: new Date().toISOString()
-      });
-      updated = true;
-    }
-
-    // Ensure Ghareb montage user is always present
-    const gharebUser = parsed.users.find((u: any) => ["ghareb@lumere.com", "ghareb.lumere.com"].includes(u.email?.toLowerCase()));
-    if (!gharebUser) {
-      parsed.users.push({
-        id: "ghareb-user-id",
-        email: "ghareb@lumere.com",
-        fullName: "غريب",
-        password: "ghareb123",
-        role: "employee",
-        status: "Approved",
-        specialization: "مونتير",
-        phone: "01095809078",
-        bio: "محرر ومونتير فيديو محترف - وكالة LUMÉRÉ",
-        created_at: new Date().toISOString()
-      });
-      updated = true;
-    } else if (gharebUser.phone !== "01095809078") {
-      gharebUser.phone = "01095809078";
-      updated = true;
-    }
-
-    // Ensure Mohamed photographer user is always present
-    const hasMohamed = parsed.users.some((u: any) => ["mohamed@lumere.gmail.com", "mohamed.lumere.gmail.com"].includes(u.email?.toLowerCase()));
-    if (!hasMohamed) {
-      parsed.users.push({
-        id: "mohamed-user-id",
-        email: "mohamed@lumere.gmail.com",
-        fullName: "محمد",
-        password: "mohamed2233",
-        role: "employee",
-        status: "Approved",
-        specialization: "مصور",
-        phone: "01032659109",
-        bio: "مصور محترف - وكالة LUMÉRÉ",
-        created_at: new Date().toISOString()
-      });
-      updated = true;
-    }
-
-    if (!parsed.equipment || parsed.equipment.length === 0) {
-      parsed.equipment = defaultEquipmentList;
-      updated = true;
-    }
-
-    if (updated) {
-      fs.writeFileSync(DB_FILE, JSON.stringify(parsed, null, 2));
+    const parsed = JSON.parse(fs.readFileSync(DB_FILE, "utf-8")) as DBStructure;
+    if (ensureSeedUsers(parsed)) {
+      saveDB(parsed);
     }
     return parsed;
   } catch (err) {
-    console.error("Error reading database file, resetting:", err);
-    return {
-      users: [
-        {
-          id: "admin-user-id",
-          email: "yousef555554321@gmail.com",
-          password: "146008",
-          role: "admin",
-          status: "Approved",
-          created_at: new Date().toISOString()
-        },
-        {
-          id: "mohamed-user-id",
-          email: "mohamed@lumere.gmail.com",
-          fullName: "محمد",
-          password: "mohamed2233",
-          role: "employee",
-          status: "Approved",
-          specialization: "مصور",
-          phone: "01032659109",
-          bio: "مصور محترف - وكالة LUMÉRÉ",
-          created_at: new Date().toISOString()
-        }
-      ],
-      clients: [],
-      projects: [],
-      tasks: [],
-      finances: [],
-      payroll: [],
-      notifications: [],
-      auditLogs: []
-    };
+    // The DB file exists but could not be parsed. Preserve the corrupt file for
+    // recovery instead of silently overwriting it with a fresh default DB.
+    console.error("Error reading database file, backing up and resetting:", err);
+    recoveryBackup();
+    return seedDefaults();
   }
 }
 
 function saveDB(db: DBStructure) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+  // Write atomically: serialize to a temp file first, then rename over the real path
+  // so a crash or concurrent write can never leave a truncated db.json behind.
+  const tmpFile = `${DB_FILE}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(tmpFile, JSON.stringify(db, null, 2));
+    fs.renameSync(tmpFile, DB_FILE);
+  } catch (err) {
+    try {
+      if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    } catch {
+      // Ignore cleanup failures; the original error is the meaningful one
+    }
+    console.error("Error writing database file:", err);
+    throw err;
+  }
 }
 
 // Log actions with exact audit logging as requested
@@ -292,6 +288,52 @@ function logAudit(db: DBStructure, userId: string, userEmail: string, action: st
   });
 }
 
+// Requests that passed through authUser carry the authenticated user on `user`.
+interface AuthenticatedRequest extends express.Request {
+  user: UserProfile;
+}
+
+// Narrows an Express request to one that has already been through authUser.
+function authedUser(req: express.Request): UserProfile {
+  return (req as AuthenticatedRequest).user;
+}
+
+// --- PASSWORD HASHING ---
+// Passwords are never stored in cleartext. Each password gets a random salt and is
+// stretched with scrypt; the stored value is "scrypt$<salt>$<hash>" so older plaintext
+// records (which contain no "$" prefix) can still be verified and upgraded on login.
+const SCRYPT_KEYLEN = 64;
+
+function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const derived = crypto.scryptSync(password, salt, SCRYPT_KEYLEN);
+  return `scrypt$${salt}$${derived.toString("hex")}`;
+}
+
+function isHashedPassword(stored?: string): boolean {
+  return typeof stored === "string" && stored.startsWith("scrypt$");
+}
+
+function verifyPassword(candidate: string, stored?: string): boolean {
+  if (!stored) return false;
+  if (!isHashedPassword(stored)) {
+    // Legacy plaintext record: compare directly (length-checked to keep timing flat).
+    const a = Buffer.from(candidate);
+    const b = Buffer.from(stored);
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  }
+  const [, salt, expectedHex] = (stored as string).split("$");
+  if (!salt || !expectedHex) return false;
+  const expected = Buffer.from(expectedHex, "hex");
+  let derived: Buffer;
+  try {
+    derived = crypto.scryptSync(candidate, salt, expected.length);
+  } catch {
+    return false;
+  }
+  return derived.length === expected.length && crypto.timingSafeEqual(derived, expected);
+}
+
 // Check authorization middleware
 const authUser = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const authHeader = req.headers.authorization;
@@ -304,7 +346,7 @@ const authUser = (req: express.Request, res: express.Response, next: express.Nex
   if (!user) {
     return res.status(401).json({ error: "المستخدم غير موجود" });
   }
-  (req as any).user = user;
+  (req as AuthenticatedRequest).user = user;
   next();
 };
 
@@ -314,7 +356,7 @@ const isAdminRole = (role: unknown): boolean => {
 };
 
 const adminOnly = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const user = (req as any).user as UserProfile;
+  const user = authedUser(req);
   if (!isAdminRole(user.role)) {
     return res.status(403).json({ error: "هذه الصلاحية للمدير فقط" });
   }
@@ -327,20 +369,28 @@ app.post("/api/auth/login", (req, res) => {
   if (!email || !password) {
     return res.status(400).json({ error: "يرجى إدخال البريد الإلكتروني وكلمة المرور" });
   }
-  
+
   const db = loadDB();
   const normalizedEmail = email.trim().toLowerCase();
   const emailWithAt = !normalizedEmail.includes("@") && normalizedEmail.includes(".")
     ? normalizedEmail.substring(0, normalizedEmail.indexOf(".")) + "@" + normalizedEmail.substring(normalizedEmail.indexOf(".") + 1)
     : normalizedEmail;
-  
-  // Find user by email and password
+
+  // Find the account by email first, then verify the password against its stored hash.
+  // Matching on email separately lets us run a constant-time comparison instead of a
+  // plain string equality that would leak a password's characters via response timing.
   const user = db.users.find(u => {
     const uEmail = u.email.trim().toLowerCase();
-    return (uEmail === normalizedEmail || uEmail === emailWithAt) && u.password === password;
+    return uEmail === normalizedEmail || uEmail === emailWithAt;
   });
-  if (!user) {
+  if (!user || !verifyPassword(password, user.password)) {
     return res.status(401).json({ error: "البريد الإلكتروني أو كلمة المرور غير صحيحة" });
+  }
+
+  // Transparently upgrade legacy plaintext passwords to a salted hash on first login.
+  if (!isHashedPassword(user.password)) {
+    user.password = hashPassword(password);
+    saveDB(db);
   }
 
   if (user.status === "Pending Approval") {
@@ -364,7 +414,7 @@ app.post("/api/auth/signup", (req, res) => {
 
   const db = loadDB();
   const normalizedEmail = email.trim().toLowerCase();
-  
+
   const exists = db.users.some(u => u.email.trim().toLowerCase() === normalizedEmail);
   if (exists) {
     return res.status(400).json({ error: "هذا البريد الإلكتروني مسجل بالفعل في النظام" });
@@ -373,7 +423,7 @@ app.post("/api/auth/signup", (req, res) => {
   const newUser: UserProfile & { password?: string } = {
     id: "usr_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
     email: normalizedEmail,
-    password: password,
+    password: hashPassword(password),
     role: "employee",
     status: "Pending Approval",
     fullName,
@@ -411,9 +461,9 @@ app.post("/api/users/approve", authUser, adminOnly, (req, res) => {
   db.users[userIndex].status = "Approved";
   db.users[userIndex].specialization = specialization;
   db.users[userIndex].contract_status = "قيد التوقيع"; // Default contract status
-  
+
   // Log action
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(db, admin.id, admin.email, "APPROVE_EMPLOYEE", `تم قبول الموظف ${db.users[userIndex].email} بتخصص ${specialization}`);
 
   // Create welcome notification
@@ -445,7 +495,7 @@ app.post("/api/users/reject", authUser, adminOnly, (req, res) => {
   const userEmail = db.users[userIndex].email;
   db.users.splice(userIndex, 1);
 
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(db, admin.id, admin.email, "REJECT_EMPLOYEE", `تم رفض وحذف طلب انضمام الموظف ${userEmail}`);
 
   saveDB(db);
@@ -475,12 +525,12 @@ app.post("/api/users/update-contract", authUser, adminOnly, (req, res) => {
   db.users[userIndex].contract_url = contractUrl || "";
   db.users[userIndex].contract_status = contractStatus;
 
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(
-    db, 
-    admin.id, 
-    admin.email, 
-    "UPDATE_EMPLOYEE_CONTRACT", 
+    db,
+    admin.id,
+    admin.email,
+    "UPDATE_EMPLOYEE_CONTRACT",
     `تم تحديث عقد الموظف ${db.users[userIndex].email} للحالة: ${contractStatus}`
   );
 
@@ -515,7 +565,7 @@ app.post("/api/equipment", authUser, adminOnly, (req, res) => {
 
   db.equipment.unshift(newItem);
 
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(db, admin.id, admin.email, "CREATE_EQUIPMENT", `تم إضافة معدة جديدة: ${name} (${category})`);
 
   saveDB(db);
@@ -536,6 +586,16 @@ app.post("/api/equipment/checkout", authUser, adminOnly, (req, res) => {
     return res.status(404).json({ error: "المعدة غير موجودة" });
   }
 
+  // Only available equipment can be checked out. Without this guard a second
+  // checkout would silently overwrite the current holder and project assignment.
+  const item = db.equipment[itemIndex];
+  if (item.status !== "متاحة") {
+    const holder = item.assigned_to_name ? ` لدى ${item.assigned_to_name}` : "";
+    return res.status(409).json({
+      error: `لا يمكن تسليم المعدة لأن حالتها الحالية (${item.status})${holder}`
+    });
+  }
+
   db.equipment[itemIndex] = {
     ...db.equipment[itemIndex],
     status: "قيد الاستخدام",
@@ -548,7 +608,7 @@ app.post("/api/equipment/checkout", authUser, adminOnly, (req, res) => {
     notes: notes ? `${db.equipment[itemIndex].notes || ""} | تسليم: ${notes}` : db.equipment[itemIndex].notes
   };
 
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(db, admin.id, admin.email, "CHECKOUT_EQUIPMENT", `تم تسليم المعدة ${db.equipment[itemIndex].name} لـ ${assigned_to_name}`);
 
   saveDB(db);
@@ -583,7 +643,7 @@ app.post("/api/equipment/return", authUser, adminOnly, (req, res) => {
     return_date: undefined
   };
 
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(db, admin.id, admin.email, "RETURN_EQUIPMENT", `تم استلام وإعادة المعدة ${returnedName} من ${returnedUser}`);
 
   saveDB(db);
@@ -608,7 +668,7 @@ app.put("/api/equipment/:id", authUser, adminOnly, (req, res) => {
   if (notes !== undefined) db.equipment[itemIndex].notes = notes;
   if (status) db.equipment[itemIndex].status = status;
 
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(db, admin.id, admin.email, "UPDATE_EQUIPMENT", `تم تعديل بيانات المعدة: ${db.equipment[itemIndex].name}`);
 
   saveDB(db);
@@ -628,7 +688,7 @@ app.delete("/api/equipment/:id", authUser, adminOnly, (req, res) => {
   const deletedName = db.equipment[itemIndex].name;
   db.equipment.splice(itemIndex, 1);
 
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(db, admin.id, admin.email, "DELETE_EQUIPMENT", `تم حذف المعدة: ${deletedName}`);
 
   saveDB(db);
@@ -653,12 +713,12 @@ app.post("/api/users/rate", authUser, adminOnly, (req, res) => {
 
   db.users[userIndex].rating = numRating;
 
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(
-    db, 
-    admin.id, 
-    admin.email, 
-    "RATE_EMPLOYEE", 
+    db,
+    admin.id,
+    admin.email,
+    "RATE_EMPLOYEE",
     `تم تقييم الموظف ${db.users[userIndex].email} بـ ${numRating} نجوم`
   );
 
@@ -667,6 +727,51 @@ app.post("/api/users/rate", authUser, adminOnly, (req, res) => {
 });
 
 // --- CLIENT MANAGEMENT (ADMIN ONLY) ---
+
+// Creates or updates the portal login for a client: hashes the password onto the client
+// record and keeps the matching db.users entry in sync (matched by account id or email).
+// The client is expected to be already present in db.clients, but does not need to be saved yet.
+function upsertClientUser(
+  db: DBStructure,
+  client: ClientProfile,
+  plainPassword: string,
+  accountIdOverride?: string
+): ClientProfile {
+  const normalizedEmail = client.email.trim().toLowerCase();
+  const clientUserId = accountIdOverride || client.account_id || ("clt_user_" + client.id);
+  const hashedPassword = hashPassword(plainPassword);
+
+  client.has_account = true;
+  client.password = hashedPassword;
+  client.account_id = clientUserId;
+
+  const existingUserIndex = db.users.findIndex(
+    u => u.id === clientUserId || u.email.trim().toLowerCase() === normalizedEmail
+  );
+  const clientUser: UserProfile & { password?: string } = {
+    id: clientUserId,
+    email: normalizedEmail,
+    password: hashedPassword,
+    role: "client",
+    status: "Approved",
+    fullName: client.name,
+    phone: client.phone,
+    specialization: "عميل",
+    bio: `حساب عميل معتمد - ${client.business_type || "عميل الوكالة"}`,
+    rating: 5,
+    client_id: client.id,
+    created_at: client.created_at || new Date().toISOString()
+  };
+
+  if (existingUserIndex >= 0) {
+    db.users[existingUserIndex] = { ...db.users[existingUserIndex], ...clientUser };
+  } else {
+    db.users.push(clientUser);
+  }
+
+  return client;
+}
+
 app.get("/api/clients", authUser, adminOnly, (req, res) => {
   const db = loadDB();
   res.json(db.clients);
@@ -695,39 +800,13 @@ app.post("/api/clients", authUser, adminOnly, (req, res) => {
     has_account: false
   };
 
-  if (create_account && portal_password) {
-    newClient.has_account = true;
-    newClient.password = portal_password;
-    const clientUserId = "clt_user_" + clientId;
-    newClient.account_id = clientUserId;
-
-    // Create user record in db.users for login
-    const existingUserIndex = db.users.findIndex(u => u.email.trim().toLowerCase() === normalizedEmail);
-    const clientUser: UserProfile & { password?: string } = {
-      id: clientUserId,
-      email: normalizedEmail,
-      password: portal_password,
-      role: "client",
-      status: "Approved",
-      fullName: name,
-      phone,
-      specialization: "عميل",
-      bio: `حساب عميل معتمد - ${business_type}`,
-      rating: 5,
-      client_id: clientId,
-      created_at: new Date().toISOString()
-    };
-
-    if (existingUserIndex >= 0) {
-      db.users[existingUserIndex] = { ...db.users[existingUserIndex], ...clientUser };
-    } else {
-      db.users.push(clientUser);
-    }
-  }
-
   db.clients.push(newClient);
 
-  const admin = (req as any).user as UserProfile;
+  if (create_account && portal_password) {
+    upsertClientUser(db, newClient, portal_password, newClient.account_id);
+  }
+
+  const admin = authedUser(req);
   logAudit(db, admin.id, admin.email, "CREATE_CLIENT", `تم إنشاء عميل جديد: ${name} (${normalizedEmail})` + (create_account ? " وتفعيل حساب البوابة" : ""));
 
   saveDB(db);
@@ -750,35 +829,10 @@ app.post("/api/clients/:id/account", authUser, adminOnly, (req, res) => {
 
   const client = db.clients[clientIndex];
   const normalizedEmail = client.email.trim().toLowerCase();
-  const clientUserId = client.account_id || ("clt_user_" + client.id);
 
-  client.has_account = true;
-  client.password = password;
-  client.account_id = clientUserId;
+  upsertClientUser(db, client, password);
 
-  const existingUserIndex = db.users.findIndex(u => u.id === clientUserId || u.email.trim().toLowerCase() === normalizedEmail);
-  const clientUser: UserProfile & { password?: string } = {
-    id: clientUserId,
-    email: normalizedEmail,
-    password: password,
-    role: "client",
-    status: "Approved",
-    fullName: client.name,
-    phone: client.phone,
-    specialization: "عميل",
-    bio: `حساب عميل معتمد - ${client.business_type || "عميل الوكالة"}`,
-    rating: 5,
-    client_id: client.id,
-    created_at: client.created_at || new Date().toISOString()
-  };
-
-  if (existingUserIndex >= 0) {
-    db.users[existingUserIndex] = { ...db.users[existingUserIndex], ...clientUser };
-  } else {
-    db.users.push(clientUser);
-  }
-
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(db, admin.id, admin.email, "SAVE_CLIENT_ACCOUNT", `تم حفظ وتفعيل حساب دخول العميل ${client.name} (${normalizedEmail})`);
 
   saveDB(db);
@@ -803,7 +857,7 @@ app.delete("/api/clients/:id/account", authUser, adminOnly, (req, res) => {
   // Remove client user from db.users
   db.users = db.users.filter(u => !(u.client_id === id || u.email.trim().toLowerCase() === normalizedEmail && u.role === "client"));
 
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(db, admin.id, admin.email, "DELETE_CLIENT_ACCOUNT", `تم إلغاء وحذف حساب الدخول للعميل ${client.name}`);
 
   saveDB(db);
@@ -825,12 +879,12 @@ app.post("/api/clients/update-contract", authUser, adminOnly, (req, res) => {
   db.clients[clientIndex].contract_url = contractUrl || "";
   db.clients[clientIndex].contract_status = contractStatus;
 
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(
-    db, 
-    admin.id, 
-    admin.email, 
-    "UPDATE_CLIENT_CONTRACT", 
+    db,
+    admin.id,
+    admin.email,
+    "UPDATE_CLIENT_CONTRACT",
     `تم تحديث عقد العميل ${db.clients[clientIndex].name} للحالة: ${contractStatus}`
   );
 
@@ -853,7 +907,7 @@ app.delete("/api/clients/:id", authUser, adminOnly, (req, res) => {
   // Clean up user account if existed
   db.users = db.users.filter(u => !(u.client_id === id || u.email.trim().toLowerCase() === clientEmail && u.role === "client"));
 
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(db, admin.id, admin.email, "DELETE_CLIENT", `تم حذف العميل ${clientName}`);
 
   saveDB(db);
@@ -863,7 +917,7 @@ app.delete("/api/clients/:id", authUser, adminOnly, (req, res) => {
 // --- PROJECT MANAGEMENT ---
 app.get("/api/projects", authUser, (req, res) => {
   const db = loadDB();
-  const user = (req as any).user as UserProfile;
+  const user = authedUser(req);
 
   if (isAdminRole(user.role)) {
     return res.json(db.projects);
@@ -904,7 +958,7 @@ app.post("/api/projects", authUser, adminOnly, (req, res) => {
   db.projects.push(newProject);
 
   // Auto-log revenue setup? No, revenue should be logged explicitly in Finance & Vault when received.
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(db, admin.id, admin.email, "CREATE_PROJECT", `تم إنشاء مشروع جديد: ${title} للعميل ${client.name}`);
 
   saveDB(db);
@@ -914,7 +968,7 @@ app.post("/api/projects", authUser, adminOnly, (req, res) => {
 // --- TASK MANAGEMENT ---
 app.get("/api/tasks", authUser, (req, res) => {
   const db = loadDB();
-  const user = (req as any).user as UserProfile;
+  const user = authedUser(req);
 
   if (isAdminRole(user.role)) {
     res.json(db.tasks);
@@ -966,12 +1020,12 @@ app.post("/api/tasks", authUser, adminOnly, (req, res) => {
     created_at: new Date().toISOString()
   });
 
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(
-    db, 
-    admin.id, 
-    admin.email, 
-    "CREATE_TASK", 
+    db,
+    admin.id,
+    admin.email,
+    "CREATE_TASK",
     `تم إسناد مهمة "${title}" للموظف ${staff.email} بمشروع ${project.title}`
   );
 
@@ -983,7 +1037,7 @@ app.post("/api/tasks", authUser, adminOnly, (req, res) => {
 app.put("/api/tasks/:id", authUser, (req, res) => {
   const { id } = req.params;
   const { status, delivery_notes } = req.body;
-  const user = (req as any).user as UserProfile;
+  const user = authedUser(req);
 
   const db = loadDB();
   const taskIndex = db.tasks.findIndex(t => t.id === id);
@@ -998,27 +1052,32 @@ app.put("/api/tasks/:id", authUser, (req, res) => {
     return res.status(403).json({ error: "غير مصرح لك بتعديل هذه المهمة" });
   }
 
-  // If status is updated to completed, they must provide delivery notes
-  if (status === "Completed" && !delivery_notes && user.role === "employee") {
+  const oldStatus = task.status;
+  const isCompleting = status === "Completed" && oldStatus !== "Completed";
+
+  // Any transition into Completed requires delivery notes — admins included, so a
+  // completion can never reach the notification below without a record of the work.
+  // Notes already stored on the task (e.g. an admin re-saving status) also satisfy this.
+  const effectiveNotes = delivery_notes !== undefined ? delivery_notes : task.delivery_notes;
+  if (isCompleting && !effectiveNotes) {
     return res.status(400).json({ error: "يجب إدخال تفاصيل وملاحظات التسليم لروابط أو ملفات الشغل" });
   }
 
-  const oldStatus = task.status;
   task.status = status;
   if (delivery_notes !== undefined) {
     task.delivery_notes = delivery_notes;
   }
 
   // Trigger Notifications
-  if (status === "Completed" && oldStatus !== "Completed") {
-    // Notify Admin that employee completed the task
-    const admins = db.users.filter(u => u.role === "admin");
+  if (isCompleting) {
+    // Notify Admin that the task was completed
+    const admins = db.users.filter(u => isAdminRole(u.role));
     admins.forEach(adm => {
       db.notifications.unshift({
         id: "not_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
         user_id: adm.id,
         title: "تم تسليم مهمة بنجاح ✅",
-        message: `قام الموظف (${user.email}) بتسليم المهمة "${task.title}" بمشروع "${task.project_title}" وملاحظاته: ${delivery_notes || "بدون"}`,
+        message: `قام (${user.email}) بتسليم المهمة "${task.title}" بمشروع "${task.project_title}" وملاحظاته: ${effectiveNotes}`,
         is_read: false,
         created_at: new Date().toISOString()
       });
@@ -1026,10 +1085,10 @@ app.put("/api/tasks/:id", authUser, (req, res) => {
   }
 
   logAudit(
-    db, 
-    user.id, 
-    user.email, 
-    "UPDATE_TASK_STATUS", 
+    db,
+    user.id,
+    user.email,
+    "UPDATE_TASK_STATUS",
     `تم تعديل حالة المهمة "${task.title}" من ${oldStatus} إلى ${status}`
   );
 
@@ -1046,7 +1105,7 @@ app.delete("/api/tasks/:id", authUser, (req, res) => {
     return res.status(404).json({ error: "المهمة غير موجودة" });
   }
 
-  const user = (req as any).user as UserProfile;
+  const user = authedUser(req);
   const task = db.tasks[taskIndex];
   if (!isAdminRole(user.role) && task.assigned_to_id !== user.id) {
     return res.status(403).json({ error: "ليس لديك صلاحية حذف هذه المهمة" });
@@ -1076,7 +1135,7 @@ app.post("/api/finances", authUser, adminOnly, (req, res) => {
   }
 
   const db = loadDB();
-  const creator = (req as any).user as UserProfile;
+  const creator = authedUser(req);
 
   const newTx: FinanceTransaction = {
     id: "tx_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
@@ -1093,10 +1152,10 @@ app.post("/api/finances", authUser, adminOnly, (req, res) => {
   db.finances.push(newTx);
 
   logAudit(
-    db, 
-    creator.id, 
-    creator.email, 
-    "ADD_FINANCE_TRANSACTION", 
+    db,
+    creator.id,
+    creator.email,
+    "ADD_FINANCE_TRANSACTION",
     `تم تسجيل (${type === "revenue" ? "إيراد" : "مصروف"}) بقيمة ${amount} ج.م - العنوان: ${title}`
   );
 
@@ -1107,7 +1166,7 @@ app.post("/api/finances", authUser, adminOnly, (req, res) => {
 // Delete financial transaction - For Admins
 app.delete("/api/finances/:id", authUser, adminOnly, (req, res) => {
   const { id } = req.params;
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
 
   const db = loadDB();
   const txIndex = db.finances.findIndex(f => f.id === id);
@@ -1119,10 +1178,10 @@ app.delete("/api/finances/:id", authUser, adminOnly, (req, res) => {
   db.finances.splice(txIndex, 1);
 
   logAudit(
-    db, 
-    admin.id, 
-    admin.email, 
-    "DELETE_FINANCE_TRANSACTION", 
+    db,
+    admin.id,
+    admin.email,
+    "DELETE_FINANCE_TRANSACTION",
     `تم حذف معاملة مالية بقيمة ${tx.amount} ج.م - العنوان: ${tx.title}`
   );
 
@@ -1161,12 +1220,12 @@ app.post("/api/payroll", authUser, adminOnly, (req, res) => {
 
   db.payroll.push(newRecord);
 
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(
-    db, 
-    admin.id, 
-    admin.email, 
-    "CREATE_PAYROLL", 
+    db,
+    admin.id,
+    admin.email,
+    "CREATE_PAYROLL",
     `تم تسجيل مستحق مرتب للموظف ${staff.email} لشهر ${month} بقيمة ${amount} ج.م`
   );
 
@@ -1192,7 +1251,7 @@ app.put("/api/payroll/:id/pay", authUser, adminOnly, (req, res) => {
   record.payment_date = new Date().toISOString();
 
   // Deduct from Vault as Expense automatically!
-  const creator = (req as any).user as UserProfile;
+  const creator = authedUser(req);
   const newTx: FinanceTransaction = {
     id: "tx_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
     type: "expense",
@@ -1207,10 +1266,10 @@ app.put("/api/payroll/:id/pay", authUser, adminOnly, (req, res) => {
   db.finances.push(newTx);
 
   logAudit(
-    db, 
-    creator.id, 
-    creator.email, 
-    "PAY_EMPLOYEE_SALARY", 
+    db,
+    creator.id,
+    creator.email,
+    "PAY_EMPLOYEE_SALARY",
     `تم صرف مرتب الموظف ${record.employee_email} بقيمة ${record.amount} ج.م لشهر ${record.month} وخصمه تلقائياً كـ (مصروف)`
   );
 
@@ -1239,12 +1298,12 @@ app.delete("/api/payroll/:id", authUser, adminOnly, (req, res) => {
   const record = db.payroll[recordIndex];
   db.payroll.splice(recordIndex, 1);
 
-  const admin = (req as any).user as UserProfile;
+  const admin = authedUser(req);
   logAudit(
-    db, 
-    admin.id, 
-    admin.email, 
-    "DELETE_PAYROLL", 
+    db,
+    admin.id,
+    admin.email,
+    "DELETE_PAYROLL",
     `تم حذف قيد المرتب للموظف ${record.employee_email} لشهر ${record.month}`
   );
 
@@ -1256,7 +1315,7 @@ app.delete("/api/payroll/:id", authUser, adminOnly, (req, res) => {
 app.get("/api/system/stress-test", authUser, adminOnly, (req, res) => {
   const memory = process.memoryUsage();
   const db = loadDB();
-  
+
   // Simulate a bit of CPU workload (sine/cosine math) so a stress test registers real CPU stress
   let sum = 0;
   for (let i = 0; i < 50000; i++) {
@@ -1286,18 +1345,18 @@ app.get("/api/system/stress-test", authUser, adminOnly, (req, res) => {
 
 // --- NOTIFICATIONS API ---
 app.get("/api/notifications", authUser, (req, res) => {
-  const user = (req as any).user as UserProfile;
+  const user = authedUser(req);
   const db = loadDB();
-  
+
   // Filter notifications for current user
   const myNotifications = db.notifications.filter(n => n.user_id === user.id);
   res.json(myNotifications);
 });
 
 app.post("/api/notifications/read-all", authUser, (req, res) => {
-  const user = (req as any).user as UserProfile;
+  const user = authedUser(req);
   const db = loadDB();
-  
+
   db.notifications.forEach(n => {
     if (n.user_id === user.id) {
       n.is_read = true;
@@ -1310,7 +1369,7 @@ app.post("/api/notifications/read-all", authUser, (req, res) => {
 
 app.post("/api/notifications/:id/read", authUser, (req, res) => {
   const { id } = req.params;
-  const user = (req as any).user as UserProfile;
+  const user = authedUser(req);
   const db = loadDB();
 
   const notifIndex = db.notifications.findIndex(n => n.id === id && n.user_id === user.id);
@@ -1323,7 +1382,7 @@ app.post("/api/notifications/:id/read", authUser, (req, res) => {
 });
 
 app.delete("/api/notifications/clear", authUser, (req, res) => {
-  const user = (req as any).user as UserProfile;
+  const user = authedUser(req);
   const db = loadDB();
 
   db.notifications = db.notifications.filter(n => n.user_id !== user.id);
@@ -1334,14 +1393,14 @@ app.delete("/api/notifications/clear", authUser, (req, res) => {
 
 app.post("/api/notifications/whatsapp", authUser, (req, res) => {
   const { recipientPhone, recipientName, type, details } = req.body;
-  const user = (req as any).user as UserProfile;
+  const user = authedUser(req);
   const db = loadDB();
 
   logAudit(
-    db, 
-    user.id, 
-    user.email, 
-    "SEND_WHATSAPP_NOTIFICATION", 
+    db,
+    user.id,
+    user.email,
+    "SEND_WHATSAPP_NOTIFICATION",
     `تم إرسال إشعار واتساب (${type || "رسالة مباشرة"}) إلى ${recipientName || "مستلم"} (${recipientPhone || "بدون رقم"}) - التفاصيل: ${details || ""}`
   );
 
@@ -1442,7 +1501,7 @@ app.get("/auth/google-simulated", (req, res) => {
           const emailInput = document.getElementById('custom-email');
           const email = emailInput.value.trim();
           const errorMsg = document.getElementById('error-msg');
-          
+
           if (!email || !email.includes('@')) {
             errorMsg.classList.remove('hidden');
             return;
@@ -1477,10 +1536,10 @@ app.post("/api/auth/google-signin", (req, res) => {
   } else {
     // New registration via Google. We return isNewUser true.
     // The client will prefill the email and name in onboarding screen.
-    return res.json({ 
-      isNewUser: true, 
-      email: normalizedEmail, 
-      fullName: fullName || normalizedEmail.split("@")[0] 
+    return res.json({
+      isNewUser: true,
+      email: normalizedEmail,
+      fullName: fullName || normalizedEmail.split("@")[0]
     });
   }
 });
@@ -1495,7 +1554,7 @@ app.post("/api/notifications/whatsapp", authUser, (req, res) => {
   }
 
   const db = loadDB();
-  const user = (req as any).user as UserProfile;
+  const user = authedUser(req);
 
   // Log as audit entry
   logAudit(
@@ -1554,9 +1613,9 @@ app.post("/api/auth/reset-password", (req, res) => {
   }
 
   const db = loadDB();
-  const userIndex = db.users.findIndex(u => 
-    u.resetPasswordToken === token && 
-    u.resetPasswordExpires !== undefined && 
+  const userIndex = db.users.findIndex(u =>
+    u.resetPasswordToken === token &&
+    u.resetPasswordExpires !== undefined &&
     u.resetPasswordExpires > Date.now()
   );
 
@@ -1564,9 +1623,9 @@ app.post("/api/auth/reset-password", (req, res) => {
     return res.status(400).json({ error: "رابط إعادة التعيين غير صالح أو انتهت صلاحيته" });
   }
 
-  // Save new password
-  db.users[userIndex].password = newPassword;
-  
+  // Save new password (hashed with a fresh per-user salt)
+  db.users[userIndex].password = hashPassword(newPassword);
+
   // Clear token fields
   delete db.users[userIndex].resetPasswordToken;
   delete db.users[userIndex].resetPasswordExpires;
@@ -1586,14 +1645,14 @@ app.post("/api/auth/change-password", authUser, (req, res) => {
     return res.status(400).json({ error: "يجب أن تكون كلمة المرور 6 أحرف على الأقل" });
   }
 
-  const currentUser = (req as any).user;
+  const currentUser = authedUser(req);
   const db = loadDB();
   const userIndex = db.users.findIndex(u => u.id === currentUser.id);
   if (userIndex === -1) {
     return res.status(404).json({ error: "المستخدم غير موجود" });
   }
 
-  db.users[userIndex].password = newPassword;
+  db.users[userIndex].password = hashPassword(newPassword);
   saveDB(db);
 
   res.json({ message: "تم تحديث كلمة المرور بنجاح في الخادم الرئيسي" });

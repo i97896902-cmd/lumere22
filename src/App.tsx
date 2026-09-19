@@ -674,7 +674,29 @@ export default function App() {
         }
       });
 
-      // B) Task delivery notifications
+      // B) Task assignment notifications for the assigned employee.
+      // Each employee only receives notifications addressed to their own user id, so the
+      // id has to include the assignee — otherwise two employees sharing a task id would
+      // collide in the list.
+      if (user && user.role === "employee") {
+        mappedTasks.filter(t => t.assigned_to_id === user.id).forEach(t => {
+          const isDelivered = t.status === "Completed";
+          activeNotifications.push({
+            id: `task_${t.id}_${user.id}`,
+            user_id: user.id,
+            title: isDelivered ? "تم تسليم مهمتك ✅" : "مهمة جديدة موكلة إليك 📋",
+            message: isDelivered
+              ? `تم تسليم مهمة "${t.title}" في مشروع "${t.project_title}" بنجاح.`
+              : `تم تكليفك بمهمة "${t.title}" في مشروع "${t.project_title}" (العميل: ${mappedProjects.find(p => p.id === t.project_id)?.client_name || "غير محدد"}) — آخر موعد للتسليم: ${t.deadline || "غير محدد"}`,
+            is_read: false,
+            created_at: t.created_at,
+            type: "info",
+            project_id: t.project_id
+          });
+        });
+      }
+
+      // C) Task delivery notifications for admins
       mappedTasks.filter(t => t.status === "Completed" && t.delivery_notes).forEach(t => {
         activeNotifications.push({
           id: "notif_" + t.id,

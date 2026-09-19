@@ -83,6 +83,7 @@ body,
 
 .theme-light [class*="bg-[#0b0c10]"],
 .theme-light [class*="bg-[#121318]"],
+.theme-light [class*="bg-[#151619]"],
 .theme-light [class*="bg-neutral-950"] {
   background-color: #ffffff !important;
 }
@@ -225,6 +226,17 @@ body,
 .theme-light [class*="bg-emerald-600"],
 .theme-light [class*="bg-emerald-500"] { background-color: #16a34a !important; }
 .theme-light [class*="text-emerald-"] { color: #15803d !important; }
+
+/* Data tables stay light as well; the previous black headings were visually
+   disconnected from the white workspace. */
+.theme-light thead,
+.theme-light thead tr {
+  background-color: #eff6ff !important;
+  color: #1e3a8a !important;
+}
+.theme-light thead [class*="text-neutral-"] {
+  color: #475569 !important;
+}
 
 /* Mobile responsive touch and scroll helpers */
 @layer utilities {

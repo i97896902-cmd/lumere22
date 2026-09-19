@@ -32,6 +32,27 @@ function startBackendServer() {
   }
 }
 
+// Loads the bundled dist/index.html, or a readable error page when it is missing.
+function loadLocalFallback(win, localHtmlPath) {
+  if (fs.existsSync(localHtmlPath)) {
+    win.loadFile(localHtmlPath).catch((err) => {
+      console.error('Failed to load local index.html:', err);
+    });
+    return;
+  }
+
+  console.error('Neither server nor dist/index.html could be located.');
+  win.loadURL(
+    'data:text/html;charset=utf-8,' +
+    encodeURIComponent(
+      '<body style="background:#0b0c10;color:#e5e5e5;font-family:sans-serif;padding:2rem">' +
+      '<h1>LUMÉRÉ ERP</h1>' +
+      '<p>تعذر تشغيل الخادم المحلي ولم يتم العثور على ملفات الواجهة (dist/index.html).</p>' +
+      '</body>'
+    )
+  ).catch((err) => console.error('Failed to render fallback page:', err));
+}
+
 function loadAppIntoWindow(win) {
   const serverUrl = 'http://localhost:3000';
   const localHtmlPath = path.join(__dirname, 'dist', 'index.html');
@@ -63,17 +84,11 @@ function loadAppIntoWindow(win) {
       console.log('Loading app via local Express server:', serverUrl);
       win.loadURL(serverUrl).catch((err) => {
         console.warn('loadURL failed, falling back to local file:', err);
-        win.loadFile(localHtmlPath);
+        loadLocalFallback(win, localHtmlPath);
       });
     } else {
       console.log('Local server not responding; loading local dist/index.html directly');
-      if (fs.existsSync(localHtmlPath)) {
-        win.loadFile(localHtmlPath).catch((err) => {
-          console.error('Failed to load local index.html:', err);
-        });
-      } else {
-        console.error('Neither server nor dist/index.html could be located.');
-      }
+      loadLocalFallback(win, localHtmlPath);
     }
   };
 
@@ -91,8 +106,9 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false, // Allows relative ES module loading when using local files
-    },
+      // webSecurity stays at its default (true). The renderer loads either the local
+      // Express server at http://localhost:3000 or dist/index.html over file://, and
+      // both work with standard same-origin rules — no override is needed.
     autoHideMenuBar: true,
     show: false, // Show gracefully once ready
   });

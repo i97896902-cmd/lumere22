@@ -10,7 +10,7 @@ const getAuthToken = (): string => {
   }
 };
 
-export async function apiFetch(endpoint: string, options: RequestInit = {}) {
+export async function apiFetch<T = unknown>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = getAuthToken();
   const headers = {
     "Content-Type": "application/json",
@@ -18,17 +18,17 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}) {
     ...(options.headers || {}),
   };
 
+  // Resolution order: explicit build-time override, then the origin the app is actually
+  // served from (Express serves both the API and the SPA, and the Electron shell loads
+  // http://localhost:3000), and finally relative URLs so the browser resolves them itself.
   const envUrl = (import.meta as any).env.VITE_API_URL || (import.meta as any).env.VITE_APP_URL;
-  const productionUrl = "https://ais-pre-4scvmfa4vl2woic4t3y2da-498451977070.europe-west2.run.app";
-  
-  let baseUrl = productionUrl;
+
+  let baseUrl = "";
   if (envUrl) {
-    baseUrl = envUrl;
-  } else if (typeof window !== "undefined") {
-    const host = window.location.hostname;
-    if (host !== "localhost" && host !== "127.0.0.1" && host !== "") {
-      baseUrl = window.location.origin;
-    }
+    // Strip any trailing slash so `${baseUrl}${endpoint}` never produces a double slash.
+    baseUrl = String(envUrl).replace(/\/+$/, "");
+  } else if (typeof window !== "undefined" && window.location.origin) {
+    baseUrl = window.location.origin;
   }
 
   const resolvedUrl = endpoint.startsWith("http") ? endpoint : `${baseUrl}${endpoint}`;
@@ -50,5 +50,5 @@ export async function apiFetch(endpoint: string, options: RequestInit = {}) {
     throw new Error(errData.error || `خطأ في الخادم (${response.status})`);
   }
 
-  return response.json();
+  return response.json() as Promise<T>;
 }

@@ -100,7 +100,7 @@ export default function StressTestDashboard() {
   const fetchTelemetry = async () => {
     setLoadingTelemetry(true);
     try {
-      const data = await apiFetch("/api/system/stress-test");
+      const data = await apiFetch<SystemTelemetry>("/api/system/stress-test");
       setTelemetry(data);
     } catch (error) {
       console.error("Failed to fetch telemetry:", error);
