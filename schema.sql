@@ -79,15 +79,18 @@ DO $$ BEGIN
 END $$;
 
 -- 4. TASKS Table
--- assigned_to_id is TEXT, not UUID REFERENCES profiles(id): staff accounts created outside
--- Supabase Auth use non-UUID ids, and the FK rejected tasks assigned to them (the admin UI
--- then silently fell back to localStorage, so the employee saw neither task nor alert).
+-- ROOT DESIGN (do NOT change UUID to TEXT to hide bad IDs):
+--   profiles.id (UUID) = auth.users.id (Supabase Auth UUID)
+--   employees are profiles rows with role='employee' (no separate employees table)
+--   tasks.assigned_to_id (UUID) REFERENCES profiles(id) — the real employee UUID
+--   tasks.project_id (UUID) REFERENCES projects(id)
+-- Fake IDs like "mohamed-user-id" must NEVER reach these columns; the frontend
+-- validates with isValidUUID() and refuses the INSERT with a clear message.
 CREATE TABLE IF NOT EXISTS tasks (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
-  assigned_to_id TEXT,
-  assigned_email TEXT,
+  assigned_to_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
   status TEXT DEFAULT 'Pending' CHECK (status IN ('Pending', 'In Progress', 'Review', 'Completed', 'Canceled', 'Rejected', 'Revisions')),
   delivery_notes TEXT,
   deadline DATE,
@@ -346,11 +349,15 @@ CREATE POLICY "Admins can manage projects" ON projects FOR ALL TO authenticated 
 DROP POLICY IF EXISTS "Tasks viewable by everyone" ON tasks;
 DROP POLICY IF EXISTS "Tasks manageable by authenticated users" ON tasks;
 DROP POLICY IF EXISTS "Authenticated users can view tasks" ON tasks;
+DROP POLICY IF EXISTS "Employees can view own tasks, admins all" ON tasks;
 DROP POLICY IF EXISTS "Admins can create and delete tasks" ON tasks;
+DROP POLICY IF EXISTS "Admins can create tasks" ON tasks;
 DROP POLICY IF EXISTS "Admins can delete tasks" ON tasks;
 DROP POLICY IF EXISTS "Assigned employees can update tasks" ON tasks;
-CREATE POLICY "Authenticated users can view tasks" ON tasks FOR SELECT TO authenticated USING (assigned_to_id = auth.uid() OR public.is_admin() OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid()));
-CREATE POLICY "Admins can create and delete tasks" ON tasks FOR INSERT TO authenticated WITH CHECK (public.is_admin());
+-- UUID-to-UUID comparison: assigned_to_id (UUID) = auth.uid() (UUID).
+-- Admin sees all, employee sees only tasks where assigned_to_id = own profiles.id.
+CREATE POLICY "Employees can view own tasks, admins all" ON tasks FOR SELECT TO authenticated USING (assigned_to_id = auth.uid() OR public.is_admin());
+CREATE POLICY "Admins can create tasks" ON tasks FOR INSERT TO authenticated WITH CHECK (public.is_admin());
 CREATE POLICY "Admins can delete tasks" ON tasks FOR DELETE TO authenticated USING (public.is_admin());
 CREATE POLICY "Assigned employees can update tasks" ON tasks FOR UPDATE TO authenticated USING (assigned_to_id = auth.uid() OR public.is_admin()) WITH CHECK (assigned_to_id = auth.uid() OR public.is_admin());
 
@@ -379,8 +386,11 @@ DROP POLICY IF EXISTS "Notifications viewable by recipient" ON notifications;
 DROP POLICY IF EXISTS "Notifications manageable by authenticated users" ON notifications;
 DROP POLICY IF EXISTS "Recipients can view notifications" ON notifications;
 DROP POLICY IF EXISTS "Recipients can update notifications" ON notifications;
+DROP POLICY IF EXISTS "Admins can create notifications" ON notifications;
+-- UUID-to-UUID: notifications.user_id (UUID) = auth.uid() (UUID). Same reference as tasks.
 CREATE POLICY "Recipients can view notifications" ON notifications FOR SELECT TO authenticated USING (user_id = auth.uid() OR public.is_admin());
 CREATE POLICY "Recipients can update notifications" ON notifications FOR UPDATE TO authenticated USING (user_id = auth.uid() OR public.is_admin()) WITH CHECK (user_id = auth.uid() OR public.is_admin());
+CREATE POLICY "Admins can create notifications" ON notifications FOR INSERT TO authenticated WITH CHECK (public.is_admin());
 
 DROP POLICY IF EXISTS "Audit logs viewable by admins" ON audit_logs;
 DROP POLICY IF EXISTS "Admins can view audit logs" ON audit_logs;

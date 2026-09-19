@@ -12,9 +12,9 @@ import {
   EquipmentItem, EquipmentCategory, EquipmentStatus
 } from "./types";
 import { createClient } from "@supabase/supabase-js";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { apiFetch } from "./lib/api";
 import { supabase } from "./lib/supabaseClient";
-import RealtimeChannel from "@supabase/supabase-js/dist/module/lib/RealtimeChannel";
 import ContractPreviewModal from "./components/ContractPreviewModal";
 import Sidebar from "./components/Sidebar";
 import StressTestDashboard from "./components/StressTestDashboard";
@@ -24,7 +24,7 @@ import TaskDeliveryModal from "./components/TaskDeliveryModal";
 import EquipmentManager from "./components/EquipmentManager";
 import CalendarView from "./components/CalendarView";
 import { NotificationManagerModal } from "./components/NotificationManagerModal";
-import { sendAppNotification } from "./lib/notifications";
+import { sendAppNotification, playNotificationSound } from "./lib/notifications";
 import { openWhatsAppMessage, getTaskDeliveredWhatsAppTemplate } from "./lib/whatsapp";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
 
@@ -228,8 +228,16 @@ export default function App() {
   };
 
   // Supabase record IDs are UUIDs. Any other ID belongs to the local/demo cache
-  // and must never be sent to an RPC parameter typed as UUID.
-  const isLocalRecordId = (id: string) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id) || [
+  // and must never be sent to a column/RPC parameter typed as UUID.
+  // UUID validation (v1-v5): rejects null/undefined/empty/name/fake IDs like "mohamed-user-id".
+  const isValidUUID = (value: unknown): value is string => {
+    if (typeof value !== "string") return false;
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(trimmed);
+  };
+
+  const isLocalRecordId = (id: string) => !isValidUUID(id) || [
     "ibrahim-mohamed-id-97896902",
     "mohamed-user-id",
     "ghareb-user-id"
@@ -572,11 +580,9 @@ export default function App() {
         ...tasksData.map(t => {
           const proj = mappedProjects.find(p => p.id === t.project_id);
           const emp = approvedUsers.find(e => e.id === t.assigned_to_id);
-          // Supabase is not guaranteed to hold a profile row for every seeded staff member
-          // (and seeded ids are not UUIDs), so a raw assigned_to_id can point at nobody and
-          // the employee would never see the task. Store the assignee's email alongside the
-          // id so authorship can still be resolved by email when the id lookup misses.
-          const assignedEmail = (t.assigned_email || emp?.email || "").toLowerCase().trim();
+          // ROOT DESIGN: tasks.assigned_to_id is UUID REFERENCES profiles(id).
+          // profiles.id = auth.users.id (Supabase Auth UUID). No email fallback:
+          // the query must use the real employee UUID, not name/email/fake ID.
           return {
             id: t.id,
             project_id: t.project_id,
@@ -584,7 +590,7 @@ export default function App() {
             title: t.title,
             assigned_to_id: t.assigned_to_id,
             assigned_to_name: emp ? (emp.fullName || emp.email.split("@")[0]) : "موظف مجهول",
-            assigned_to_email: assignedEmail,
+            assigned_to_email: (emp?.email || "").toLowerCase().trim(),
             status: (t.status || "Pending") as TaskStatus,
             deadline: t.deadline || "",
             delivery_notes: t.delivery_notes,
@@ -711,7 +717,10 @@ export default function App() {
     if (user) {
       loadAllData(false);
       
-      // Set up Supabase Realtime subscription for notifications
+      // Set up Supabase Realtime subscription for notifications.
+      // Filter by user_id only when it is a real UUID; a fake/local ID would make
+      // the PostgREST filter invalid for the UUID-typed notifications.user_id column.
+      const realtimeFilter = isValidUUID(user.id) ? { filter: `user_id=eq.${user.id}` } : {};
       const channel = supabase
         .channel('notifications_changes')
         .on(
@@ -720,7 +729,7 @@ export default function App() {
             event: '*',
             schema: 'public',
             table: 'notifications',
-            filter: `user_id=eq.${user.id}`
+            ...realtimeFilter
           },
           (payload) => {
             if (payload.eventType === 'INSERT') {
@@ -740,8 +749,7 @@ export default function App() {
                   days_left: newNotif.days_left
                 }, ...prev].slice(0, 50);
               });
-              // Play notification sound
-              const { playNotificationSound } = require("./lib/notifications");
+              // Play notification sound (imported at top; no require() in ESM/Vite)
               playNotificationSound();
             } else if (payload.eventType === 'UPDATE') {
               const updatedNotif = payload.new as any;
@@ -1044,56 +1052,30 @@ export default function App() {
       localStorage.setItem("local_profiles_bypass", JSON.stringify(localProfiles));
     };
 
-    // Seed the requested employee ibrahim mohamed
-    seedLocalUser(
-      "i97896902@gmail.com",
-      {
-        id: "ibrahim-mohamed-id-97896902",
-        email: "i97896902@gmail.com",
-        full_name: "ibrahim mohamed",
-        phone: "01144158508",
-        role: "employee",
-        status: "approved",
-        specialization: "مبرمج جوكر",
-        bio: "ضيفه موظف مبرمج جوكر",
-        portfolio_link: "",
-        created_at: new Date().toISOString()
+    // ROOT FIX: fake employee IDs ("mohamed-user-id", "ibrahim-mohamed-id-97896902",
+    // "ghareb-user-id") were previously seeded here with non-UUID strings. When the admin
+    // picked one of them in the task form, that string was sent to the UUID-typed
+    // tasks.assigned_to_id column → "invalid input syntax for type uuid".
+    // Employees MUST come from Supabase Auth + profiles (real UUID = auth.users.id).
+    // Real employees are created via "إضافة موظف" which calls Supabase Auth signUp.
+    // So: never seed fake employees, and purge any fake entries left in old browsers.
+    const FAKE_EMPLOYEE_IDS = new Set([
+      "ibrahim-mohamed-id-97896902",
+      "mohamed-user-id",
+      "ghareb-user-id",
+    ]);
+    try {
+      const existingProfiles = readLocalJson<any[]>("local_profiles_bypass", []);
+      const cleaned = existingProfiles.filter((p: any) => !FAKE_EMPLOYEE_IDS.has(p?.id));
+      if (cleaned.length !== existingProfiles.length) {
+        localStorage.setItem("local_profiles_bypass", JSON.stringify(cleaned));
       }
-    );
-
-    // Seed the requested employee mohamed (مصور)
-    seedLocalUser(
-      "mohamed@lumere.gmail.com",
-      {
-        id: "mohamed-user-id",
-        email: "mohamed@lumere.gmail.com",
-        full_name: "محمد",
-        phone: "01032659109",
-        role: "employee",
-        status: "approved",
-        specialization: "مصور",
-        bio: "مصور محترف - وكالة LUMÉRÉ",
-        portfolio_link: "",
-        created_at: new Date().toISOString()
-      }
-    );
-
-    // Seed the requested employee ghareb (مونتير)
-    seedLocalUser(
-      "ghareb@lumere.com",
-      {
-        id: "ghareb-user-id",
-        email: "ghareb@lumere.com",
-        full_name: "غريب",
-        phone: "01095809078",
-        role: "employee",
-        status: "approved",
-        specialization: "مونتير",
-        bio: "محرر ومونتير فيديو محترف - وكالة LUMÉRÉ",
-        portfolio_link: "",
-        created_at: new Date().toISOString()
-      }
-    );
+      const existingTasks = readLocalJson<any[]>("local_tasks_bypass", []);
+      // Demo tasks that point at fake employees stay local-only and are never sent to
+      // Supabase (UUID validation blocks them). Keep them for local demo display only.
+    } catch {
+      // Ignore cleanup failures; validation below is the real guard.
+    }
 
     // Seed default demo client with project & tasks to verify client portal and completion percentage
     const demoClientEmail = "client@lumere.com";
@@ -1375,10 +1357,13 @@ export default function App() {
           }
 
           // If still fails (or offline/missing session provider), trigger absolute fallback bypass so the admin is NEVER locked out!
+          // NOTE: emergency offline ID is a valid UUID (never a fake string) but has no
+          // Supabase session, so RLS (is_admin() via auth.uid()) still denies DB writes.
+          // Real task creation requires a Supabase Auth admin session.
           if (signInError) {
             console.warn("Bypassing Supabase auth entirely for initial admin to prevent lockout.");
             const emergencyUser = {
-              id: "admin-user-id",
+              id: "99999999-9999-4999-8999-999999999999",
               email: cleanEmail,
               role: "admin" as UserRole,
               status: "Approved" as UserStatus,
@@ -2167,10 +2152,13 @@ export default function App() {
     }
   };
 
-  // Notifications Handlers
+  // Notifications Handlers — notifications.id is UUID; never send local/demo IDs.
   const handleMarkNotificationRead = async (id: string) => {
+    if (!isValidUUID(id)) {
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+      return;
+    }
     try {
-      // Update in database
       const { error } = await supabase
         .from("notifications")
         .update({ is_read: true })
@@ -2178,8 +2166,9 @@ export default function App() {
       if (error) throw error;
     } catch (err) {
       console.warn("Mark notification read failed:", err);
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
     }
-    // Local state will be updated via Realtime subscription
+    // DB-backed rows also update via Realtime subscription.
   };
 
   const handleClearNotifications = async () => {
@@ -2733,71 +2722,77 @@ export default function App() {
     }
   };
 
-  // Add Task
+  // Add Task — ROOT FIX: tasks.assigned_to_id is UUID REFERENCES profiles(id),
+  // and tasks.project_id is UUID REFERENCES projects(id).
+  // profiles.id = auth.users.id (real Supabase Auth UUID). Never send fake IDs
+  // like "mohamed-user-id", names, emails, null/undefined/empty to UUID columns.
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      // Resolve the assignee up front so the task can be re-found by email later, no matter
-      // which id form ends up stored in Supabase.
-      const assignedEmployee = employees.find(e => e.id === newTask.assigned_to_id);
-      const assignedEmail = (assignedEmployee?.email || "").toLowerCase().trim();
+      const rawProjectId = (newTask.project_id || "").trim();
+      const rawAssigneeId = (newTask.assigned_to_id || "").trim();
+      const title = (newTask.title || "").trim();
 
+      // 1. Validate UUIDs BEFORE touching the server (requirement §4).
+      if (!isValidUUID(rawProjectId)) {
+        showToast("معرف المشروع غير صالح (يجب أن يكون UUID حقيقي من قاعدة البيانات). أعد اختيار المشروع من القائمة.", "error");
+        return;
+      }
+      if (!isValidUUID(rawAssigneeId)) {
+        showToast("معرف الموظف غير صالح (قيمة وهمية مثل mohamed-user-id مرفوضة). اختر موظفاً حقيقياً له حساب Supabase Auth.", "error");
+        return;
+      }
+      if (!title) {
+        showToast("عنوان المهمة مطلوب", "error");
+        return;
+      }
 
+      // 2. Resolve the employee record and verify its ID is the real profiles UUID.
+      const assignedEmployee = employees.find(emp => emp.id === rawAssigneeId);
+      if (!assignedEmployee) {
+        showToast("الموظف المختار غير موجود في سجلات النظام", "error");
+        return;
+      }
+      if (!isValidUUID(assignedEmployee.id)) {
+        showToast(`سجل الموظف (${assignedEmployee.email}) يحمل معرفاً وهمياً وليس UUID حقيقي. أنشئ للموظف حساب Supabase Auth أولاً.`, "error");
+        return;
+      }
+
+      // 3. Verify the project is a real Supabase row (UUID), not a local demo record.
+      const linkedProject = projects.find(p => p.id === rawProjectId);
+      if (!linkedProject || !isValidUUID(linkedProject.id)) {
+        showToast("المشروع المختار ليس سجلاً حقيقياً في قاعدة البيانات (سجلات العرض المحلية لا تقبل مهام حقيقية).", "error");
+        return;
+      }
+
+      // 4. Build the row with REAL UUIDs only. No assigned_email (original schema has
+      // no such column), no names, no fake IDs.
       const taskRow: Record<string, any> = {
-        project_id: newTask.project_id,
-        title: newTask.title,
-        assigned_to_id: newTask.assigned_to_id,
-        assigned_email: assignedEmail || null,
+        project_id: rawProjectId,
+        title,
+        assigned_to_id: assignedEmployee.id,
         status: "Pending",
-        deadline: newTask.deadline,
+        deadline: newTask.deadline || null,
       };
 
-      let { error } = await supabase.from("tasks").insert(taskRow);
+      // 5. Send to server. The DB trigger creates the notification for the assignee UUID.
+      const { data: inserted, error } = await supabase.from("tasks").insert(taskRow).select().single();
+      if (error) throw error;
 
-      // If the assigned_email column has not been migrated in yet, retry without it so
-      // assigning a task never depends on having run the migration.
-      if (error && /assigned_email/.test(error.message || "")) {
-        console.warn("tasks.assigned_email column missing; retrying without it.", error.message);
-        delete taskRow.assigned_email;
-        ({ error } = await supabase.from("tasks").insert(taskRow));
-      }
-
-      if (error) {
-        if (user && user.role === "admin") {
-          console.warn("Supabase insertion failed. Initiating Super Admin Bypass logic:", error);
-          const localId = "local_tsk_" + Math.random().toString(36).substring(2, 9);
-          const linkedProject = projects.find(p => p.id === newTask.project_id);
-          const linkedEmployee = employees.find(e => e.id === newTask.assigned_to_id);
-          const newLocalTask = {
-            id: localId,
-            project_id: newTask.project_id,
-            project_title: linkedProject ? linkedProject.title : "مشروع مجهول",
-            title: newTask.title,
-            assigned_to_id: newTask.assigned_to_id,
-            assigned_to_name: linkedEmployee ? (linkedEmployee.fullName || linkedEmployee.email.split("@")[0]) : "موظف مجهول",
-            assigned_to_email: assignedEmail,
-            status: "Pending" as TaskStatus,
-            deadline: newTask.deadline,
-            created_at: new Date().toISOString()
-          };
-          const existing = JSON.parse(localStorage.getItem("local_tasks_bypass") || "[]");
-          localStorage.setItem("local_tasks_bypass", JSON.stringify([newLocalTask, ...existing]));
-          // This fallback only lives in THIS browser, so the employee's own device will not
-          // see the task. Say so plainly instead of reporting a normal success.
-          showToast("تم حفظ المهمة محلياً فقط، ولم تصل للخادم — الموظف لن يراها على جهازه. السبب: " + (error.message || "خطأ في الخادم"), "error");
-        } else {
-          throw error;
-        }
-      } else {
-        showToast("تم تكليف الموظف بالمهمة الفنية بنجاح", "success");
-      }
+      showToast(`تم تكليف الموظف (${assignedEmployee.email}) بالمهمة الفنية بنجاح`, "success");
 
       setShowAddTask(false);
       setNewTask({ project_id: "", title: "", assigned_to_id: "", deadline: "" });
-      loadAllData();
+      await loadAllData();
+      // Notification for the assignee is created by the DB trigger on tasks INSERT.
+      await fetchNotifications(true);
+      void inserted;
     } catch (err: any) {
-      showToast(err.message || "حدث خطأ في الاتصال", "error");
+      // Never mask a programming error (e.g. bad UUID) as a "local save".
+      // Surface the real server message so the mapping can be fixed.
+      console.error("Task INSERT failed:", err);
+      showToast(err.message || "فشل إنشاء المهمة في قاعدة البيانات", "error");
     } finally {
       setSubmitting(false);
     }
@@ -2842,23 +2837,29 @@ export default function App() {
       // Direct local update in UI state first for snappy feedback
       setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status } : t));
 
+      // Local demo tasks (non-UUID ids like "task_demo_1") live in localStorage only;
+      // never send them to the UUID-typed tasks.id column.
+      if (!isValidUUID(taskId)) {
+        const localTasks = JSON.parse(localStorage.getItem("local_tasks_bypass") || "[]");
+        const updated = localTasks.map((t: any) => t.id === taskId ? { ...t, status } : t);
+        localStorage.setItem("local_tasks_bypass", JSON.stringify(updated));
+        showToast("تم تحديث حالة المهمة بنجاح ✔️", "success");
+        loadAllData();
+        return;
+      }
+
       const { error } = await supabase
         .from("tasks")
         .update({ status: status })
         .eq("id", taskId);
 
-      if (error) {
-        console.warn("Supabase task status update failed, applying bypass:", error);
-        const localTasks = JSON.parse(localStorage.getItem("local_tasks_bypass") || "[]");
-        const updated = localTasks.map((t: any) => t.id === taskId ? { ...t, status } : t);
-        localStorage.setItem("local_tasks_bypass", JSON.stringify(updated));
-        showToast("تم تحديث حالة المهمة بنجاح ✔️", "success");
-      } else {
-        showToast("تم تحديث حالة المهمة بنجاح", "success");
-      }
+      if (error) throw error;
+      showToast("تم تحديث حالة المهمة بنجاح", "success");
       loadAllData();
     } catch (err: any) {
+      console.error("Task status update failed:", err);
       showToast(err.message || "حدث خطأ في تحديث المهمة", "error");
+      loadAllData();
     }
   };
 
@@ -2872,26 +2873,21 @@ export default function App() {
       // Optimistic local state update
       setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: "Completed", delivery_notes: deliveryNotesText } : t));
 
-      const { error } = await supabase
-        .from("tasks")
-        .update({ status: "Completed", delivery_notes: deliveryNotesText })
-        .eq("id", taskId);
-
-      if (error) {
-        console.warn("Supabase task delivery update encountered error, applying local sync:", error);
+      // Local demo tasks never reach the UUID-typed tasks.id column.
+      if (!isValidUUID(taskId)) {
         const localTasks = JSON.parse(localStorage.getItem("local_tasks_bypass") || "[]");
         const existingIdx = localTasks.findIndex((t: any) => t.id === taskId);
         if (existingIdx !== -1) {
           localTasks[existingIdx] = { ...localTasks[existingIdx], status: "Completed", delivery_notes: deliveryNotesText };
-        } else {
-          const tsk = tasks.find(t => t.id === taskId);
-          if (tsk) {
-            localTasks.push({ ...tsk, status: "Completed", delivery_notes: deliveryNotesText });
-          }
         }
         localStorage.setItem("local_tasks_bypass", JSON.stringify(localTasks));
         showToast("تم تسليم وإنجاز مخرجات المهمة بنجاح ✔️", "success");
       } else {
+        const { error } = await supabase
+          .from("tasks")
+          .update({ status: "Completed", delivery_notes: deliveryNotesText })
+          .eq("id", taskId);
+        if (error) throw error;
         showToast("تم تسليم وإنجاز مخرجات المهمة بنجاح وجاري إبلاغ الإدارة", "success");
       }
 
@@ -3086,17 +3082,22 @@ export default function App() {
   // Read all notifications
   const handleReadAllNotifications = async () => {
     try {
-      // Update all unread notifications for current user in database
-      const { error } = await supabase
-        .from("notifications")
-        .update({ is_read: true })
-        .eq("user_id", user?.id)
-        .eq("is_read", false);
-      if (error) throw error;
+      // notifications.user_id is UUID — never send a fake/local ID to it.
+      if (user?.id && isValidUUID(user.id)) {
+        const { error } = await supabase
+          .from("notifications")
+          .update({ is_read: true })
+          .eq("user_id", user.id)
+          .eq("is_read", false);
+        if (error) throw error;
+      } else {
+        // Local-only session: just flip local state.
+        setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+      }
     } catch (err: any) {
       console.warn("Read all notifications failed:", err);
     }
-    // Local state will be updated via Realtime subscription
+    // DB-backed sessions update via Realtime subscription.
     showToast("تم قراءة جميع التنبيهات", "success");
   };
 
@@ -3483,14 +3484,10 @@ export default function App() {
   const isAdmin = normalizeUserRole(user.role) === "admin";
 
   // Single source of truth for "is this task assigned to the signed-in user?".
-  // Matching on id alone silently hid every task whose stored assignee id differs from the
-  // id the employee signed in with (e.g. a task assigned to a Supabase UUID while the
-  // employee authenticated with a local profile id). Email is the stable identifier, so a
-  // task counts as mine when either the id or the email matches.
-  const myEmailNormalized = (user.email || "").toLowerCase().trim();
-  const isTaskMine = (t: Task) =>
-    t.assigned_to_id === user.id ||
-    (!!t.assigned_to_email && t.assigned_to_email === myEmailNormalized);
+  // ROOT DESIGN: tasks.assigned_to_id is UUID REFERENCES profiles(id), and the signed-in
+  // employee's id is profiles.id = auth.users.id (UUID). Match on UUID only — never on
+  // name/email. RLS on the server enforces the same rule (assigned_to_id = auth.uid()).
+  const isTaskMine = (t: Task) => t.assigned_to_id === user.id;
 
   // Filter tasks for employee and project-specific tasks
   const myAssignedTasks = tasks.filter(isTaskMine);
@@ -4912,7 +4909,7 @@ export default function App() {
                   </div>
                   <form onSubmit={handleAddTask} className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div>
-                      <label className="block text-[11px] font-semibold text-neutral-400 mb-1">المشروع التابع له *</label>
+                      <label className="block text-[11px] font-semibold text-neutral-400 mb-1">المشروع التابع له * (سجلات Supabase الحقيقية فقط)</label>
                       <select
                         required
                         value={newTask.project_id}
@@ -4920,10 +4917,13 @@ export default function App() {
                         className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-xs text-white"
                       >
                         <option value="">-- اختر المشروع --</option>
-                        {projects.map(p => (
+                        {projects.filter(p => isValidUUID(p.id)).map(p => (
                           <option key={p.id} value={p.id}>{p.title}</option>
                         ))}
                       </select>
+                      {projects.length > 0 && projects.filter(p => isValidUUID(p.id)).length === 0 && (
+                        <p className="text-[10px] text-amber-400 mt-1">لا توجد مشاريع حقيقية (UUID) — السجلات المحلية للعرض فقط ولا تقبل مهاماً حقيقية.</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-[11px] font-semibold text-neutral-400 mb-1">عنوان المهمة المطلوب تنفيذها *</label>
@@ -4937,7 +4937,7 @@ export default function App() {
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-semibold text-neutral-400 mb-1">الموظف المسؤول عن التنفيذ *</label>
+                      <label className="block text-[11px] font-semibold text-neutral-400 mb-1">الموظف المسؤول عن التنفيذ * (حساب Supabase حقيقي فقط)</label>
                       <select
                         required
                         value={newTask.assigned_to_id}
@@ -4945,10 +4945,13 @@ export default function App() {
                         className="w-full bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 text-xs text-white"
                       >
                         <option value="">-- اختر موظفاً معتمداً --</option>
-                        {employees.map(emp => (
+                        {employees.filter(emp => isValidUUID(emp.id)).map(emp => (
                           <option key={emp.id} value={emp.id}>{emp.email} ({emp.specialization})</option>
                         ))}
                       </select>
+                      {employees.length > 0 && employees.filter(emp => isValidUUID(emp.id)).length === 0 && (
+                        <p className="text-[10px] text-amber-400 mt-1">لا يوجد موظفون بحسابات Supabase حقيقية — أنشئ الموظف عبر زر «إضافة موظف» أولاً.</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-[11px] font-semibold text-neutral-400 mb-1">الموعد الأقصى للتسليم *</label>

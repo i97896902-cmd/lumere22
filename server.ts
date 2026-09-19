@@ -124,9 +124,13 @@ interface SeedUser {
   aliases: string[];
 }
 
+// NOTE: this Express/json-file backend is legacy local dev only — the production
+// frontend uses Supabase (profiles.id UUID = auth.users.id). IDs below are real
+// UUIDv4 values (never fake strings like "mohamed-user-id") so they can never leak
+// a non-UUID string into a UUID-typed column if ever cross-referenced.
 const DEFAULT_USERS: SeedUser[] = [
   {
-    id: "admin-user-id",
+    id: "11111111-1111-4111-8111-111111111111",
     email: "yousef555554321@gmail.com",
     password: "146008",
     role: "admin",
@@ -134,7 +138,7 @@ const DEFAULT_USERS: SeedUser[] = [
     aliases: []
   },
   {
-    id: "ghareb-user-id",
+    id: "22222222-2222-4222-8222-222222222222",
     email: "ghareb@lumere.com",
     fullName: "غريب",
     password: "ghareb123",
@@ -146,7 +150,7 @@ const DEFAULT_USERS: SeedUser[] = [
     aliases: ["ghareb.lumere.com"]
   },
   {
-    id: "mohamed-user-id",
+    id: "33333333-3333-4333-8333-333333333333",
     email: "mohamed@lumere.gmail.com",
     fullName: "محمد",
     password: "mohamed2233",
