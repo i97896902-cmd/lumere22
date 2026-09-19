@@ -2601,21 +2601,21 @@ export default function App() {
         ? `[نوع النشاط: ${newClient.business_type}] ${newClient.notes || ""}`
         : newClient.notes || "";
 
-      let createdClientId = "local_clt_" + Math.random().toString(36).substring(2, 9);
-
+      // clients.id is auto-generated UUID — never invent a local id for the server row.
+      // On failure surface the real DB error; never report a local-only save as success.
       const { data: insertData, error } = await supabase.from("clients").insert({
         name: newClient.name,
         phone: newClient.phone,
         email: newClient.email,
         notes: formattedNotes,
       }).select().single();
-
-      if (insertData?.id) {
-        createdClientId = insertData.id;
+      if (error) throw error;
+      if (!insertData?.id || !isValidUUID(insertData.id)) {
+        throw new Error("الخادم لم يرجع معرف عميل (UUID) صالحاً");
       }
 
       const clientObj: ClientProfile = {
-        id: createdClientId,
+        id: insertData.id,
         name: newClient.name,
         phone: newClient.phone,
         email: newClient.email,
@@ -2627,18 +2627,7 @@ export default function App() {
         created_at: new Date().toISOString(),
       };
 
-      if (error) {
-        if (user && user.role === "admin") {
-          console.warn("Supabase insertion failed. Initiating Super Admin Bypass logic:", error);
-          const existing = JSON.parse(localStorage.getItem("local_clients_bypass") || "[]");
-          localStorage.setItem("local_clients_bypass", JSON.stringify([clientObj, ...existing]));
-          showToast("تم إضافة ملف العميل بنجاح (تخطي أمني معتمد لأدمن النظام) ✔️", "success");
-        } else {
-          throw error;
-        }
-      } else {
-        showToast("تم إضافة ملف العميل بنجاح", "success");
-      }
+      showToast("تم إضافة ملف العميل بنجاح", "success");
 
       // If create_account is enabled, provision portal login credentials immediately
       if (newClient.create_account && newClient.portal_password) {
