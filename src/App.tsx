@@ -348,6 +348,22 @@ export default function App() {
   // Fetch all relevant data based on user role
   const loadAllData = async (isPoll: boolean = false) => {
     if (!user) return;
+    // TEMP-DEBUG (assignment flow): remove after verification. Proves which IDs are real UUIDs.
+    if (!isPoll) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        console.debug("[ASSIGN-DEBUG] loadAllData session:", {
+          hasSession: !!session,
+          authUid: session?.user?.id ?? null,
+          authUidIsUUID: isValidUUID(session?.user?.id ?? ""),
+          appUserId: user.id,
+          appUserIdIsUUID: isValidUUID(user.id),
+          appRole: user.role,
+        });
+      } catch (e) {
+        console.debug("[ASSIGN-DEBUG] loadAllData session check failed:", e);
+      }
+    }
     if (!isPoll) {
       setLoadingData(true);
     }
@@ -406,6 +422,14 @@ export default function App() {
         profilesData = data || [];
       } catch (err) {
         console.error("Profiles fetch failed:", err);
+      }
+
+      // TEMP-DEBUG (assignment flow): employees returned, split by source.
+      if (!isPoll) {
+        console.debug("[ASSIGN-DEBUG] employees returned:", {
+          supabaseProfiles: profilesData.length,
+          supabaseUUIDEmployees: profilesData.filter((p: any) => isValidUUID(p.id) && normalizeUserRole(p.role) === "employee").length,
+        });
       }
 
       // Fetch from local_profiles_bypass
@@ -580,6 +604,16 @@ export default function App() {
         tasksData = data || [];
       } catch (err) {
         console.error("Tasks fetch failed:", err);
+      }
+      // TEMP-DEBUG (assignment flow): tasks returned from Supabase.
+      if (!isPoll) {
+        console.debug("[ASSIGN-DEBUG] tasks returned:", {
+          supabaseTasks: tasksData.length,
+          sample: tasksData.slice(0, 3).map((t: any) => ({
+            id: t.id, project_id: t.project_id, assigned_to_id: t.assigned_to_id,
+            idsAreUUID: isValidUUID(t.id) && isValidUUID(t.project_id) && isValidUUID(t.assigned_to_id),
+          })),
+        });
       }
 
       const localTasks = readLocalJson<any[]>("local_tasks_bypass", []);
@@ -2735,6 +2769,19 @@ export default function App() {
       const rawProjectId = (newTask.project_id || "").trim();
       const rawAssigneeId = (newTask.assigned_to_id || "").trim();
       const title = (newTask.title || "").trim();
+      // TEMP-DEBUG (assignment flow): selected IDs + current auth user.
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        console.debug("[ASSIGN-DEBUG] task form submit:", {
+          selectedProjectId: rawProjectId || null,
+          selectedProjectIsUUID: isValidUUID(rawProjectId),
+          selectedEmployeeId: rawAssigneeId || null,
+          selectedEmployeeIsUUID: isValidUUID(rawAssigneeId),
+          currentAuthUserId: session?.user?.id ?? null,
+        });
+      } catch (e) {
+        console.debug("[ASSIGN-DEBUG] task form session check failed:", e);
+      }
 
       // 1. Validate UUIDs BEFORE touching the server (requirement §4).
       if (!isValidUUID(rawProjectId)) {
@@ -2780,6 +2827,14 @@ export default function App() {
 
       // 5. Send to server. The DB trigger creates the notification for the assignee UUID.
       const { data: inserted, error } = await supabase.from("tasks").insert(taskRow).select().single();
+      // TEMP-DEBUG (assignment flow): INSERT result + notification result.
+      console.debug("[ASSIGN-DEBUG] task INSERT result:", {
+        ok: !error,
+        error: error?.message ?? null,
+        insertedId: (inserted as any)?.id ?? null,
+        insertedProjectId: (inserted as any)?.project_id ?? null,
+        insertedAssigneeId: (inserted as any)?.assigned_to_id ?? null,
+      });
       if (error) throw error;
 
       showToast(`تم تكليف الموظف (${assignedEmployee.email}) بالمهمة الفنية بنجاح`, "success");
@@ -2789,7 +2844,7 @@ export default function App() {
       await loadAllData();
       // Notification for the assignee is created by the DB trigger on tasks INSERT.
       await fetchNotifications(true);
-      void inserted;
+      console.debug("[ASSIGN-DEBUG] notification refetch requested after task INSERT");
     } catch (err: any) {
       // Never mask a programming error (e.g. bad UUID) as a "local save".
       // Surface the real server message so the mapping can be fixed.
@@ -5239,8 +5294,11 @@ export default function App() {
                                   </div>
                                 ); })}
 
-                                {projectTasks.length === 0 && (
+                                {projectTasks.length === 0 && !loadingData && (
                                   <div className="p-6 text-center text-neutral-500 text-xs">لا توجد أي مهام إسنادية مجدولة لهذا المشروع بعد</div>
+                                )}
+                                {projectTasks.length === 0 && loadingData && (
+                                  <div className="p-6 text-center text-neutral-500 text-xs">جاري جلب المهام من قاعدة البيانات...</div>
                                 )}
                               </div>
                             </div>
