@@ -2782,7 +2782,14 @@ export default function App() {
       loadAllData();
     } catch (err: any) {
       console.error("Project INSERT failed:", err);
-      showToast(err.message || "حدث خطأ في الاتصال", "error");
+      // 23514 = CHECK violation. The app sends status exactly as schema.sql defines
+      // ('قيد التنفيذ'); if prod rejects it, the LIVE constraint definition drifted
+      // from schema.sql — surface the exact inspection SQL instead of a cryptic error.
+      if (err?.code === "23514") {
+        showToast("قاعدة الإنتاج ترفض قيمة الحالة (projects_status_check تختلف عن schema.sql). نفّذ في SQL Editor: SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='projects_status_check' ثم وحّد القيم مع ('قيد التنفيذ','مكتمل','ملغي').", "error");
+      } else {
+        showToast(err.message || "حدث خطأ في الاتصال", "error");
+      }
     } finally {
       setSubmitting(false);
     }
