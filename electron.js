@@ -109,6 +109,7 @@ function createWindow() {
       // webSecurity stays at its default (true). The renderer loads either the local
       // Express server at http://localhost:3000 or dist/index.html over file://, and
       // both work with standard same-origin rules — no override is needed.
+    },
     autoHideMenuBar: true,
     show: false, // Show gracefully once ready
   });

@@ -2822,13 +2822,11 @@ export default function App() {
         console.debug("[ASSIGN-DEBUG] task form session check failed:", e);
       }
 
-      // 1. Validate UUIDs BEFORE touching the server (requirement §4).
+      // 1. Validate the project before touching the server. Employee records created by
+      // the old local/demo flow may have a legacy id; those records are repaired below,
+      // never deleted or hidden from the assignment list.
       if (!isValidUUID(rawProjectId)) {
         showToast("معرف المشروع غير صالح (يجب أن يكون UUID حقيقي من قاعدة البيانات). أعد اختيار المشروع من القائمة.", "error");
-        return;
-      }
-      if (!isValidUUID(rawAssigneeId)) {
-        showToast("معرف الموظف غير صالح (قيمة وهمية مثل mohamed-user-id مرفوضة). اختر موظفاً حقيقياً له حساب Supabase Auth.", "error");
         return;
       }
       if (!title) {
@@ -2836,15 +2834,55 @@ export default function App() {
         return;
       }
 
-      // 2. Resolve the employee record and verify its ID is the real profiles UUID.
-      const assignedEmployee = employees.find(emp => emp.id === rawAssigneeId);
-      if (!assignedEmployee) {
+      const selectedEmployee = employees.find(emp => emp.id === rawAssigneeId);
+      if (!selectedEmployee) {
         showToast("الموظف المختار غير موجود في سجلات النظام", "error");
         return;
       }
-      if (!isValidUUID(assignedEmployee.id)) {
-        showToast(`سجل الموظف (${assignedEmployee.email}) يحمل معرفاً وهمياً وليس UUID حقيقي. أنشئ للموظف حساب Supabase Auth أولاً.`, "error");
-        return;
+
+      // 2. Repair legacy employees in-place from the admin's session. The RPC keeps the
+      // employee's name/email and creates (or links) a real auth.users + profiles UUID.
+      // Nothing is deleted; only the local legacy reference is replaced with the new UUID.
+      let assignedEmployee = selectedEmployee;
+      if (!isValidUUID(selectedEmployee.id)) {
+        const generatedPassword = `${crypto.randomUUID().replace(/-/g, "").slice(0, 10)}Aa1!`;
+        const { data: repairData, error: repairError } = await supabase.rpc("admin_ensure_employee_account", {
+          p_employee_id: selectedEmployee.id,
+          p_email: selectedEmployee.email,
+          p_full_name: selectedEmployee.fullName || selectedEmployee.email.split("@")[0],
+          p_password: generatedPassword,
+          p_phone: selectedEmployee.phone || null,
+          p_specialization: selectedEmployee.specialization || null,
+          p_bio: selectedEmployee.bio || null,
+          p_portfolio_link: selectedEmployee.portfolio || null,
+        });
+        if (repairError) {
+          if (repairError.code === "PGRST202") {
+            throw new Error("إصلاح حساب الموظف غير مفعّل في Supabase. شغّل migrations/20260925_repair_employee_accounts.sql أولاً.");
+          }
+          throw repairError;
+        }
+        const repaired = (repairData as any)?.[0];
+        if (!repaired?.user_id || !isValidUUID(repaired.user_id)) {
+          throw new Error("تعذر إنشاء المعرف الحقيقي للموظف بدون حذف بياناته.");
+        }
+        assignedEmployee = { ...selectedEmployee, id: repaired.user_id };
+
+        // Keep the same employee in the local backup, changing only its technical id.
+        const localProfiles = readLocalJson<any[]>("local_profiles_bypass", []);
+        localStorage.setItem("local_profiles_bypass", JSON.stringify(localProfiles.map((profile: any) =>
+          profile.id === selectedEmployee.id ? { ...profile, id: repaired.user_id } : profile
+        )));
+        const credentials = readLocalJson<Record<string, any>>("local_profiles_credentials", {});
+        const emailKey = selectedEmployee.email.toLowerCase().trim();
+        if (credentials[emailKey]?.profile?.id === selectedEmployee.id) {
+          credentials[emailKey] = {
+            ...credentials[emailKey],
+            profile: { ...credentials[emailKey].profile, id: repaired.user_id }
+          };
+          localStorage.setItem("local_profiles_credentials", JSON.stringify(credentials));
+        }
+        showToast(`تم ربط الموظف (${selectedEmployee.email}) بحساب Supabase حقيقي بدون حذف بياناته`, "success");
       }
 
       // 3. Verify the project is a real Supabase row (UUID), not a local demo record.
@@ -3193,7 +3231,7 @@ export default function App() {
       return;
     }
     const headers = Object.keys(data[0]).join(",");
-    const rows = data.map(item => 
+    const rows = data.map(item =>
       Object.values(item).map(val => `"${String(val).replace(/"/g, '""')}"`).join(",")
     );
     const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers, ...rows].join("\n");
@@ -3234,7 +3272,7 @@ export default function App() {
         const allCompleted = projectTasks.every(t => t.status === "Completed");
         const anyInProgress = projectTasks.some(t => t.status === "In Progress" || t.status === "Review");
         const anyCompleted = projectTasks.some(t => t.status === "Completed");
-        
+
         if (allCompleted) {
           completedCount++;
         } else if (anyInProgress || anyCompleted) {
@@ -3257,7 +3295,7 @@ export default function App() {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center p-4 text-right">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-900/10 via-black to-black pointer-events-none" />
-        
+
         <div className={`w-full ${isSignUp ? "max-w-xl" : "max-w-md"} bg-[#0b0c10] border border-[#1e2025] rounded-2xl shadow-2xl p-8 relative z-10 transition-all duration-300`}>
           <div className="text-center mb-8">
             <div className="inline-flex items-center gap-2 mb-2">
@@ -3594,13 +3632,13 @@ export default function App() {
   const myCompletedTasks = myAssignedTasks.filter(t => t.status === "Completed");
   const myPendingTasks = myAssignedTasks.filter(t => t.status === "Pending" || t.status === "In Progress" || t.status === "Review");
   const myCanceledTasks = myAssignedTasks.filter(t => t.status === "Canceled");
-  const myProgress = myAssignedTasks.length > 0 
-    ? Math.round((myCompletedTasks.length / myAssignedTasks.length) * 100) 
+  const myProgress = myAssignedTasks.length > 0
+    ? Math.round((myCompletedTasks.length / myAssignedTasks.length) * 100)
     : 0;
 
   return (
     <div className="min-h-screen bg-black text-neutral-200 flex text-right font-sans">
-      
+
       {/* Toast Popup */}
       {toast && (
         <div className="fixed bottom-6 left-6 z-50 p-4 bg-[#0b0c10] border border-[#1e2025] rounded-xl shadow-2xl flex items-center gap-3 animate-slide-in">
@@ -3612,18 +3650,18 @@ export default function App() {
       )}
 
       {/* Sidebar Navigation */}
-      <Sidebar 
-        user={user} 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
-        onLogout={handleLogout} 
+      <Sidebar
+        user={user}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onLogout={handleLogout}
         isOpen={isMobileSidebarOpen}
         onClose={() => setIsMobileSidebarOpen(false)}
       />
 
       {/* Main Container */}
       <div className="flex-1 lg:mr-64 mr-0 min-h-screen flex flex-col overflow-x-hidden">
-        
+
         {/* Header Bar */}
         <header className="h-16 bg-neutral-950 border-b border-neutral-900 px-4 sm:px-8 flex items-center justify-between no-print relative z-30">
           <div className="flex items-center gap-3">
@@ -3657,7 +3695,7 @@ export default function App() {
             {/* Notification Center */}
             <div className="relative">
               <div className="flex items-center gap-1.5">
-                <button 
+                <button
                   onClick={() => {
                     setShowNotifications(!showNotifications);
                     if (!showNotifications) handleReadAllNotifications();
@@ -3700,8 +3738,8 @@ export default function App() {
                         </span>
                       )}
                     </div>
-                    <button 
-                      onClick={handleReadAllNotifications} 
+                    <button
+                      onClick={handleReadAllNotifications}
                       className="text-[10px] text-blue-400 hover:underline cursor-pointer"
                     >
                       تحديد كالمقروء
@@ -3731,13 +3769,13 @@ export default function App() {
                       notifications.map(n => {
                         const isUrgent = n.type === "urgent_deadline";
                         return (
-                          <div 
-                            key={n.id} 
+                          <div
+                            key={n.id}
                             className={`p-3.5 text-right transition ${
-                              isUrgent 
-                                ? "bg-rose-950/30 border-r-4 border-rose-500 hover:bg-rose-950/50" 
-                                : n.is_read 
-                                  ? "opacity-60 hover:opacity-100" 
+                              isUrgent
+                                ? "bg-rose-950/30 border-r-4 border-rose-500 hover:bg-rose-950/50"
+                                : n.is_read
+                                  ? "opacity-60 hover:opacity-100"
                                   : "bg-blue-950/10 hover:bg-blue-950/20"
                             }`}
                           >
@@ -3788,7 +3826,7 @@ export default function App() {
             </div>
 
             {/* Print trigger */}
-            <button 
+            <button
               onClick={() => window.print()}
               className="flex items-center gap-1.5 bg-neutral-900 hover:bg-neutral-850 text-xs text-neutral-300 px-4 py-2 rounded-xl border border-neutral-800/60 transition"
             >
@@ -3803,7 +3841,7 @@ export default function App() {
           {/* TAB 1: DASHBOARD */}
           {activeTab === "dashboard" && (
             <div className="space-y-8">
-              
+
               {/* CLIENT VIEW - DEDICATED CLIENT PORTAL & TASK COMPLETION TRACKER */}
               {user.role === "client" && (
                 <ClientPortal
@@ -3833,7 +3871,7 @@ export default function App() {
                       const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
                       const targetDay = new Date(deadlineDate.getFullYear(), deadlineDate.getMonth(), deadlineDate.getDate());
                       const diffDays = Math.ceil((targetDay.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-                      
+
                       if (diffDays < 3) {
                         return {
                           project: p,
@@ -3879,8 +3917,8 @@ export default function App() {
                           {urgentProjects.map(({ project: prj, diffDays, tasksCount, completedTasksCount }) => {
                             const progress = tasksCount > 0 ? Math.round((completedTasksCount / tasksCount) * 100) : 0;
                             return (
-                              <div 
-                                key={prj.id} 
+                              <div
+                                key={prj.id}
                                 className="bg-neutral-950/90 border border-rose-800/60 rounded-xl p-4 flex flex-col justify-between space-y-3 hover:border-rose-500/80 transition"
                               >
                                 <div>
@@ -3904,9 +3942,9 @@ export default function App() {
                                     <span className="font-bold text-rose-400 font-mono">{progress}%</span>
                                   </div>
                                   <div className="h-1.5 w-full bg-neutral-900 rounded-full overflow-hidden">
-                                    <div 
-                                      className={`h-full rounded-full transition-all ${progress === 100 ? "bg-emerald-500" : "bg-rose-500"}`} 
-                                      style={{ width: `${progress}%` }} 
+                                    <div
+                                      className={`h-full rounded-full transition-all ${progress === 100 ? "bg-emerald-500" : "bg-rose-500"}`}
+                                      style={{ width: `${progress}%` }}
                                     />
                                   </div>
                                 </div>
@@ -3964,7 +4002,7 @@ export default function App() {
 
                   {/* Main Grid: Approvals and Active stuff */}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    
+
                     {/* Left: Pending Registrations (Staff Pipeline) */}
                     <div className="lg:col-span-2 bg-[#0b0c10] border border-[#1e2025] rounded-xl p-5 flex flex-col">
                       <div className="border-b border-neutral-900 pb-3 mb-4 flex justify-between items-center">
@@ -4030,7 +4068,7 @@ export default function App() {
                               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pt-2 border-t border-neutral-900">
                                 <div className="flex items-center gap-3">
                                   <label className="text-[11px] text-neutral-400">تأكيد التخصص للتعيين:</label>
-                                  <select 
+                                  <select
                                     id={`spec-select-${usr.id}`}
                                     defaultValue={usr.specialization || "يتدرب"}
                                     className="bg-neutral-900 border border-neutral-800 text-xs px-2.5 py-1.5 rounded-lg text-white focus:outline-none focus:border-blue-500"
@@ -4182,7 +4220,7 @@ export default function App() {
               {/* EMPLOYEE VIEW - STRICTLY ISOLATED PERSONALIZED VIEW */}
               {!isAdmin && user.role !== "client" && (
                 <div className="space-y-6">
-                  
+
                   {/* Header alert */}
                   <div className="p-4 bg-blue-950/20 border border-blue-900/30 rounded-xl flex items-center gap-3">
                     <User className="w-5 h-5 text-blue-500 shrink-0" />
@@ -4200,8 +4238,8 @@ export default function App() {
                           {myProgress}%
                         </div>
                         <div className="flex-1 h-2 bg-neutral-950 rounded-full overflow-hidden border border-neutral-900">
-                          <div 
-                            className="bg-blue-600 h-full rounded-full transition-all duration-500" 
+                          <div
+                            className="bg-blue-600 h-full rounded-full transition-all duration-500"
                             style={{ width: `${myProgress}%` }}
                           />
                         </div>
@@ -4478,7 +4516,7 @@ export default function App() {
           {/* TAB 2: CLIENTS - ADMIN ONLY */}
           {activeTab === "clients" && isAdmin && (
             <div className="space-y-6">
-              
+
               {/* Search and Action Bar */}
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#0b0c10] border border-[#1e2025] p-4 rounded-xl">
                 <div className="relative flex-1 max-w-md">
@@ -4603,7 +4641,7 @@ export default function App() {
                         />
                       </div>
                     )}
-                    
+
                     {/* Account Provisioning Options */}
                     <div className="md:col-span-2 bg-neutral-950/60 border border-neutral-900 p-3 rounded-xl flex flex-col justify-center">
                       <div className="flex items-center gap-2 mb-2">
@@ -4692,7 +4730,7 @@ export default function App() {
                               <div className="text-[10px] text-neutral-500 font-mono mt-0.5">{clt.email}</div>
                             </td>
                             <td className="p-4 text-neutral-300">{clt.business_type || "غير محدد"}</td>
-                            
+
                             {/* Client Task Completion Percentage Column */}
                             <td className="p-4">
                               <div className="space-y-1.5 min-w-[130px]">
@@ -4818,7 +4856,7 @@ export default function App() {
                             </td>
                             <td className="p-4 text-left">
                               <div className="flex items-center justify-end gap-2">
-                                <button 
+                                <button
                                   onClick={() => handleDeleteClient(clt)}
                                   className="p-2 bg-rose-950/20 hover:bg-rose-900 text-rose-400 hover:text-white rounded-lg border border-rose-900/10 transition cursor-pointer"
                                   title="حذف ملف العميل وحسابه بالكامل من النظام"
@@ -4844,7 +4882,7 @@ export default function App() {
           {/* TAB 3: PROJECTS AND TASKS */}
           {activeTab === "projects" && (
             <div className="space-y-6">
-              
+
               {/* Dashboard Action Header */}
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#0b0c10] border border-[#1e2025] p-4 rounded-xl">
                 <div className="relative flex-1 max-w-md">
@@ -4878,7 +4916,7 @@ export default function App() {
                     تقويم 📅
                   </button>
                 </div>
-                
+
                 {isAdmin && (
                   <div className="flex gap-2">
                     <button
@@ -5050,9 +5088,9 @@ export default function App() {
                       >
                         <option value="">-- اختر موظفاً معتمداً --</option>
                         {employees.map(emp => (
-                          isValidUUID(emp.id)
-                            ? <option key={emp.id} value={emp.id}>{emp.email} ({emp.specialization})</option>
-                            : <option key={emp.id} value={emp.id} disabled>{emp.email} ({emp.specialization}) — يحتاج حساب Supabase حقيقي</option>
+                          <option key={emp.id} value={emp.id}>
+                            {emp.email} ({emp.specialization}){isValidUUID(emp.id) ? "" : " — سيتم ربط الحساب تلقائياً"}
+                          </option>
                         ))}
                       </select>
                       {employees.length > 0 && employees.filter(emp => isValidUUID(emp.id)).length === 0 && (
