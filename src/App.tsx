@@ -11,7 +11,6 @@ import {
   ContractStatus, PaymentMethod, ProjectTrack, UserRole, UserStatus,
   EquipmentItem, EquipmentCategory, EquipmentStatus
 } from "./types";
-import { createClient } from "@supabase/supabase-js";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { apiFetch } from "./lib/api";
 import { supabase } from "./lib/supabaseClient";
@@ -1935,72 +1934,43 @@ export default function App() {
     try {
       const cleanEmail = newEmpEmail.trim();
       const pswd = newEmpPassword.trim();
-      
-      const supabaseUrl = (import.meta as any).env.VITE_SUPABASE_URL || "https://ddigjujidraxoptfncma.supabase.co";
-      const supabaseAnonKey = (import.meta as any).env.VITE_SUPABASE_ANON_KEY || "sb_publishable_ZJGH_4j7GoDQNFXcTMBAnw_8MTr9Q-X";
-      
-      const tempSupabase = createClient(supabaseUrl, supabaseAnonKey, {
-        auth: {
-          persistSession: false,
-        }
-      });
 
-      const { data: authData, error: signUpError } = await tempSupabase.auth.signUp({
-        email: cleanEmail,
-        password: pswd,
-        options: {
-          data: {
-            full_name: newEmpFullName,
-            phone: newEmpPhone,
-            role: "employee",
-            status: "approved",
-            specialization: newEmpSpec,
-            bio: newEmpBio,
-            portfolio_link: newEmpPortfolio,
-          }
-        }
-      });
-
-      if (signUpError) {
-        throw signUpError;
+      // The RPC runs as SECURITY DEFINER and verifies is_admin() internally,
+      // so the calling admin must have a real authenticated Supabase session.
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) {
+        throw new Error("يجب تسجيل الدخول عبر حساب أدمن Supabase Auth قبل إنشاء حسابات موظفين.");
       }
 
-      const userId = authData.user?.id;
-      if (!userId) {
-        throw new Error("فشل إنشاء حساب مستخدم.");
-      }
+      // Call the database RPC that creates a REAL auth.users row + profiles row.
+      const { data: rpcData, error: rpcError } = await supabase.rpc("admin_create_employee", {
+        p_email: cleanEmail,
+        p_full_name: newEmpFullName,
+        p_password: pswd,
+        p_phone: newEmpPhone || null,
+        p_specialization: newEmpSpec,
+        p_bio: newEmpBio || null,
+        p_portfolio_link: newEmpPortfolio || null,
+      });
 
-      const dbSpec = newEmpSpec;
-
-      const { error: profileError } = await supabase
-        .from("profiles")
-        .insert({
-          id: userId,
-          email: cleanEmail,
-          full_name: newEmpFullName,
-          phone: newEmpPhone,
-          role: "employee",
-          status: "approved",
-          specialization: dbSpec,
-          bio: newEmpBio,
-          portfolio_link: newEmpPortfolio,
-        });
-
-      if (profileError) {
-        // Duplicate key (23505) = the profiles row already exists (e.g. retry or
-        // self-created on first login) — safe to continue. Any other error (notably
-        // RLS denial) means the employee does NOT exist in Supabase: fail loudly,
-        // never report a local-only copy as success.
-        if ((profileError as any)?.code !== "23505") {
-          console.error("Database profiles insert failed:", profileError);
+      if (rpcError) {
+        if (rpcError.code === "PGRST202") {
           throw new Error(
-            "فشل إنشاء سجل الموظف في قاعدة البيانات: " + (profileError.message || "RLS منعت العملية") +
-            " — تأكد من تطبيق migrations/20260922_profiles_admin_insert.sql ثم أعد المحاولة."
+            "دالة إنشاء حساب الموظف غير متوفرة في قاعدة البيانات. شغّل migrations/20260924_employee_real_account.sql أولاً."
           );
         }
-        console.warn("Profiles row already exists, continuing:", profileError.message);
+        throw rpcError;
       }
 
+      const rpcResult = (rpcData as any)?.[0];
+      if (!rpcResult) {
+        throw new Error("لم يتم إرجاع بيانات حساب الموظف من قاعدة البيانات.");
+      }
+
+      const userId: string = rpcResult.user_id;
+
+      // Keep a local backup so the employee appears in the UI immediately
+      // even if the next reload hits a network blip.
       const newLocalProfile = {
         id: userId,
         email: cleanEmail,
@@ -2016,7 +1986,10 @@ export default function App() {
       const existingProfiles = JSON.parse(localStorage.getItem("local_profiles_bypass") || "[]");
       localStorage.setItem("local_profiles_bypass", JSON.stringify([newLocalProfile, ...existingProfiles]));
 
-      showToast("تم إنشاء وإضافة الموظف الجديد بنجاح! ✔️", "success");
+      showToast(
+        `تم إنشاء حساب قاعدة بيانات حقيقي للموظف (${newEmpFullName}) بنجاح! 🔑 البريد: ${cleanEmail} — كلمة المرور: ${pswd}`,
+        "success"
+      );
       
       setNewEmpEmail("");
       setNewEmpPassword("");

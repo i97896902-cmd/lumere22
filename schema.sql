@@ -309,6 +309,22 @@ BEGIN
 END;
 $$;
 
+-- 11b. Employee account provisioning (creates a REAL auth.users + profiles row)
+--     Called from the admin UI via supabase.rpc('admin_create_employee', ...).
+--     See migrations/20260924_employee_real_account.sql for the full definition.
+--     The function generates a bcrypt-hashed password, inserts auth.users with
+--     email_confirmed_at = now() (no email verification needed), inserts a
+--     profiles row (role='employee', status='approved'), and returns
+--     (user_id, email, password) so the admin can share credentials.
+
+-- 11c. Employee password reset (updates auth.users.encrypted_password)
+--     Called from the admin UI via supabase.rpc('admin_reset_employee_password', ...).
+--     See migrations/20260924_employee_real_account.sql for the full definition.
+
+-- 11d. Employee account listing with auth.user presence check
+--     Called from the admin UI via supabase.rpc('admin_list_employee_accounts', ...).
+--     See migrations/20260924_employee_real_account.sql for the full definition.
+
 -- 12. Supabase Auth RLS hardening
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS BOOLEAN
