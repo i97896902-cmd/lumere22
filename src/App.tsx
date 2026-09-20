@@ -1987,7 +1987,18 @@ export default function App() {
         });
 
       if (profileError) {
-        console.warn("Database profiles insert failed:", profileError);
+        // Duplicate key (23505) = the profiles row already exists (e.g. retry or
+        // self-created on first login) — safe to continue. Any other error (notably
+        // RLS denial) means the employee does NOT exist in Supabase: fail loudly,
+        // never report a local-only copy as success.
+        if ((profileError as any)?.code !== "23505") {
+          console.error("Database profiles insert failed:", profileError);
+          throw new Error(
+            "فشل إنشاء سجل الموظف في قاعدة البيانات: " + (profileError.message || "RLS منعت العملية") +
+            " — تأكد من تطبيق migrations/20260922_profiles_admin_insert.sql ثم أعد المحاولة."
+          );
+        }
+        console.warn("Profiles row already exists, continuing:", profileError.message);
       }
 
       const newLocalProfile = {
