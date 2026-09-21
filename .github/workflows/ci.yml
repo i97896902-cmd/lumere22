@@ -24,8 +24,8 @@ jobs:
       - name: Run tests
         run: npm run test
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_URL: https://ddigjujidraxoptfncma.supabase.co
+          SUPABASE_ANON_KEY: sb_publishable_ZJGH_4j7GoDQNFXcTMBAnw_8MTr9Q-X
 
       - name: Build
         run: npm run build
