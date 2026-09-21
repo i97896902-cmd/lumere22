@@ -112,6 +112,16 @@ BEGIN
     NULL
   );
 
+  -- GoTrue requires an email identity for password sign-in. Keep this in sync
+  -- with auth.users when provisioning accounts directly from this RPC.
+  INSERT INTO auth.identities (
+    id, user_id, provider_id, identity_data, provider, created_at, updated_at
+  ) VALUES (
+    gen_random_uuid(), v_user_id, v_email_norm,
+    jsonb_build_object('sub', v_user_id::text, 'email', v_email_norm),
+    'email', v_now, v_now
+  );
+
   -- 2) Create / upsert the profiles row so the employee is immediately visible
   --    and assignable to tasks, equipment, payroll, etc.
   INSERT INTO public.profiles (

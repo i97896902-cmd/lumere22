@@ -50,6 +50,17 @@ BEGIN
         updated_at = v_now
     WHERE id = v_user_id;
 
+    INSERT INTO auth.identities (
+      id, user_id, provider_id, identity_data, provider, created_at, updated_at
+    )
+    SELECT gen_random_uuid(), v_user_id, v_email_norm,
+           jsonb_build_object('sub', v_user_id::text, 'email', v_email_norm),
+           'email', v_now, v_now
+    WHERE NOT EXISTS (
+      SELECT 1 FROM auth.identities
+      WHERE user_id = v_user_id AND provider = 'email'
+    );
+
     UPDATE public.profiles
     SET full_name = coalesce(nullif(trim(p_full_name), ''), full_name),
         phone = coalesce(p_phone, phone),
@@ -86,6 +97,14 @@ BEGIN
     '{"provider":"email","providers":["email"]}'::jsonb,
     jsonb_build_object('full_name', p_full_name, 'role', 'employee', 'status', 'approved'),
     '[]'::jsonb, NULL
+  );
+
+  INSERT INTO auth.identities (
+    id, user_id, provider_id, identity_data, provider, created_at, updated_at
+  ) VALUES (
+    gen_random_uuid(), v_user_id, v_email_norm,
+    jsonb_build_object('sub', v_user_id::text, 'email', v_email_norm),
+    'email', v_now, v_now
   );
 
   INSERT INTO public.profiles (
