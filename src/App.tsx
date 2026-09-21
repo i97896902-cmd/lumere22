@@ -1272,7 +1272,10 @@ export default function App() {
     setAuthSuccess("");
     setAuthLoading(true);
 
-    const cleanEmail = email.trim();
+    // Supabase Auth normalizes email addresses; matching that normalization here
+    // prevents an employee created with `Name@Company.com` from signing in with
+    // a profile/account stored as `name@company.com`.
+    const cleanEmail = email.trim().toLowerCase();
 
     // Email Validation Check
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -1923,6 +1926,35 @@ export default function App() {
     }, "حذف الموظف نهائياً");
   };
 
+  const handleResetEmployeePassword = async (employee: UserProfile) => {
+    if (!isValidUUID(employee.id)) {
+      showToast("اربط الموظف بحساب Supabase أولاً من خلال إسناد مهمة، ثم عيّن كلمة المرور.", "error");
+      return;
+    }
+    const newPassword = window.prompt(`اكتب كلمة مرور جديدة للموظف ${employee.email} (6 أحرف على الأقل):`, "");
+    if (newPassword === null) return;
+    if (newPassword.trim().length < 6) {
+      showToast("كلمة المرور يجب أن تكون 6 أحرف على الأقل", "error");
+      return;
+    }
+
+    try {
+      const { error } = await supabase.rpc("admin_reset_employee_password", {
+        p_employee_id: employee.id,
+        p_new_password: newPassword.trim(),
+      });
+      if (error) {
+        if (error.code === "PGRST202") {
+          throw new Error("دالة تغيير كلمة المرور غير مفعّلة. شغّل migrations/20260927_reset_employee_password.sql في Supabase.");
+        }
+        throw error;
+      }
+      showToast(`تم تغيير كلمة مرور ${employee.email} بنجاح. استخدم البريد وكلمة المرور الجديدة للدخول.`, "success");
+    } catch (err: any) {
+      showToast(err.message || "تعذر تغيير كلمة مرور الموظف", "error");
+    }
+  };
+
   const handleCreateEmployeeManually = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEmpEmail || !newEmpPassword || !newEmpFullName) {
@@ -1932,8 +1964,10 @@ export default function App() {
 
     setSubmitting(true);
     try {
-      const cleanEmail = newEmpEmail.trim();
-      const pswd = newEmpPassword.trim();
+      const cleanEmail = newEmpEmail.trim().toLowerCase();
+      // Do not alter passwords: spaces are valid password characters. Validation
+      // below only rejects passwords that are too short after accidental padding.
+      const pswd = newEmpPassword;
 
       // The RPC runs as SECURITY DEFINER and verifies is_admin() internally,
       // so the calling admin must have a real authenticated Supabase session.

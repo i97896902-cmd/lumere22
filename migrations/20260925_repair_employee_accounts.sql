@@ -41,6 +41,15 @@ BEGIN
   -- If the employee already has a real account, reuse it and do not create or delete anything.
   SELECT id INTO v_user_id FROM auth.users WHERE lower(email) = v_email_norm LIMIT 1;
   IF v_user_id IS NOT NULL THEN
+    -- The previous repair may have generated a password the employee never received.
+    -- Always replace it with the password supplied by the admin during this repair.
+    v_hash := crypt(p_password, gen_salt('bf'));
+    UPDATE auth.users
+    SET encrypted_password = v_hash,
+        email_confirmed_at = coalesce(email_confirmed_at, v_now),
+        updated_at = v_now
+    WHERE id = v_user_id;
+
     UPDATE public.profiles
     SET full_name = coalesce(nullif(trim(p_full_name), ''), full_name),
         phone = coalesce(p_phone, phone),
